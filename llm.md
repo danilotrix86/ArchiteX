@@ -6,9 +6,11 @@ Use this document to onboard into what has been built so far. Read it fully befo
 
 A DevSecOps CLI tool that parses Terraform (`.tf`) files, builds an architecture graph, computes semantic deltas between graph versions, and evaluates architectural risk. It runs locally or in CI. It is NOT a full Terraform interpreter -- it handles a narrow, curated subset of constructs.
 
-## Current Phase: Phase 5 (COMPLETE)
+## Current Phase: Phase 5.1 (COMPLETE)
 
 Phase 5 packages the Phase 1-4 deterministic pipeline as a GitHub Action. Every Terraform PR can now receive the Markdown report (from Phase 4) as a sticky PR comment, with the audit bundle uploaded as a workflow artifact and an optional blocking-mode exit code. No analysis logic was added or changed -- only the distribution layer. The analysis binary still performs zero outbound network I/O; the new `architex comment` subcommand is the single, isolated network surface and only reads files written by the analysis binary.
+
+Phase 5.1 hardens Phase 5 against large deltas. Empirical stress testing on real GitHub PRs (see "Phase 5.1 -- Large-Delta Hardening") found that PRs adding ~100+ resources produce Mermaid blocks above mermaid-js's 50,000-char `maxTextSize` default, at which point GitHub stops rendering the diagram. Two deterministic safety nets now guard the output: a 45,000-char diagram density cap in the renderer (`interpreter.MermaidBudget`) that drops the lowest-priority nodes and announces the truncation with a visible placeholder, and a 240,000-byte comment-body safety net in `runComment` (`commentBodyBudget`) that strips the diagram block before posting if the body is approaching GitHub's 262,144-byte mediumblob storage limit. Both caps are observable, deterministic, and never silently lose data -- the full diagram remains in the audit bundle artifact.
 
 ### Phase 1 (COMPLETE)
 
@@ -51,6 +53,34 @@ Phase 5 packages the Phase 1-4 deterministic pipeline as a GitHub Action. Every 
 - New `.github/workflows/architex.yml`: a `selftest` job that runs the binary against `testdata/base` -> `testdata/head` and asserts that all five §10.1 sections (plus the sticky-comment footer marker) are present in the produced `summary.md`, plus a `dogfood` job that consumes the action via `uses: ./` on the same PR
 - New `docs/github-action.md`: consumer-facing documentation (inputs, permissions, three rollout phases mirroring master.md §11, trust model, local-equivalence recipe)
 - 9 new unit tests in `github/client_test.go` covering create-when-absent, update-when-present, ignore-non-marker comments, follow-pagination, auth/header injection, refusal-on-empty-marker, refusal-on-body-without-marker, non-success-error, and `parseNextLink`
+
+### Phase 5.1 -- Large-Delta Hardening (COMPLETE)
+
+After Phase 5 was live, an empirical stress probe (`scripts/stress-mermaid.ps1`) ran the full pipeline against synthetic Terraform pairs of varying delta size and measured the resulting `summary.md` and Mermaid block sizes. Two real PRs (`architex-test-customer#2` N=50 and `#3` N=200) confirmed the numbers under real GitHub Actions conditions.
+
+Empirical findings (cited):
+- **GitHub comment body limit is 262,144 bytes**, NOT the often-cited 65,536 chars. The smaller number is the 4-byte-per-char worst case for a MySQL `mediumblob`. See [community/27190](https://github.community/t/maximum-length-for-the-comment-body-in-issues-and-pr/148867). PR #3 successfully posted a 148,131-char comment.
+- **mermaid-js `maxTextSize` default is 50,000 chars**. Above that, GitHub renders "Maximum text size in diagram exceeded" instead of the diagram. See [mermaid-cli/issues/113](https://github.com/mermaid-js/mermaid-cli/issues/113). PR #3's 120,843-char Mermaid block triggered exactly this.
+
+Hardening shipped (additive only -- no semantic change to the analysis pipeline):
+- New `interpreter.RenderMermaidBudgeted(d, maxBytes)` that wraps `RenderMermaid` with a deterministic node-priority cap. Priority order is `status` (changed > added > removed > context), then `typePriority` (entry_point > data > compute > network > access_control), then ID alphabetical for ties. Edges survive iff both endpoints survive. When truncation engages, the diagram gets an explicit `_architex_truncated` placeholder node announcing the hidden node/edge counts. Default budget = `MermaidBudget = 45_000` (5 KB safety margin under mermaid-js's 50,000).
+- `interpreter.Render` now calls the budgeted variant; the original `RenderMermaid` is preserved unchanged for callers that want raw output (and for the deterministic golden-substring tests).
+- New `capCommentBody(body, maxBytes)` in `main.go` is invoked by `runComment` before the POST. It first strips the ```mermaid ... ``` block (replaced with a one-line "Diagram omitted -- see audit bundle" notice), then falls back to a marker-preserving hard truncate if the body is still oversize. The sticky marker is preserved in every fallback so the next run can still find and update the same comment in place. Default budget = `commentBodyBudget = 240_000` (22 KB safety margin under GitHub's 262,144).
+- New `scripts/stress-mermaid.ps1`: a permanent dev probe that generates synthetic deltas of configurable size, runs `architex report`, and prints byte sizes plus a `DiagramCapped` flag. Intended both for one-off exploration and for verifying that future renderer changes don't regress the cap.
+- 6 new unit tests in `interpreter/mermaid_budget_test.go` (small-delta passthrough, large-delta truncation, determinism, type-priority preservation, budget=0 escape hatch, edge endpoint integrity) and 5 new tests in `main_test.go` (cap helper passthrough, mermaid stripping, hard-truncation fallback, budget=0, and a regression test for `splitRepoSlug`).
+
+Verification numbers (post-cap, from `stress-mermaid.ps1 -Sizes 5,25,50,100,200,400`):
+
+| N | summary bytes | mermaid bytes | diagram capped? | over body cap? |
+|---|---:|---:|:---:|:---:|
+| 5   | 3,607  | 2,543  | no  | no |
+| 25  | 14,579 | 11,159 | no  | no |
+| 50  | 28,354 | 21,984 | no  | no |
+| 100 | 55,920 | 43,645 | no  | no |
+| 200 | 69,249 | 44,974 | **yes** | no |
+| 400 | 93,259 | 44,983 | **yes** | no |
+
+The diagram-density cap fires on schedule at N≈100-200; the body-cap remains dormant defense-in-depth across the full sweep.
 
 ### Phase 5 -- Live Validation
 
@@ -104,18 +134,20 @@ graph/graph.go           # Graph construction (nodes, edges, derived attrs, conf
 delta/delta.go           # Delta Engine: Compare(), HumanSummary(), delta types
 risk/risk.go             # Risk Engine: Evaluate(), scoring, severity/status, JSON formatting
 risk/rules.go            # 5 rule implementations
-interpreter/interpreter.go  # Stage 4: Report struct, Interpreter interface, Render()
-interpreter/mermaid.go      # Deterministic Mermaid flowchart renderer
+interpreter/interpreter.go  # Stage 4: Report struct, Interpreter interface, Render() (uses RenderMermaidBudgeted)
+interpreter/mermaid.go      # Deterministic Mermaid flowchart renderer + Phase 5.1 budget-aware variant
 interpreter/summary.go      # DeterministicInterpreter (Summary + ReviewFocus templates)
 interpreter/markdown.go     # Five-section PR-comment formatter (emits sticky marker footer)
 interpreter/sanitize.go     # EgressPayload + Sanitize() (name hashing, allowlisted fields)
 interpreter/audit.go        # WriteAudit() -- timestamped bundle with manifest checksums
 github/client.go            # Phase 5: minimal GitHub REST client + UpsertStickyComment (only network surface)
 github/client_test.go       # httptest-backed unit tests
+main_test.go                # Phase 5.1: capCommentBody safety-net tests + splitRepoSlug regression
 action.yml                  # Phase 5: composite GitHub Action (checkout x2 -> setup-go -> report -> comment -> upload)
 .github/workflows/architex.yml  # Phase 5: selftest + dogfood jobs
+scripts/stress-mermaid.ps1  # Phase 5.1: synthetic-delta stress probe + cap regression check
 docs/egress-schema.json     # Published JSON Schema for EgressPayload (parity-tested)
-docs/github-action.md       # Phase 5: consumer documentation
+docs/github-action.md       # Phase 5: consumer documentation (incl. Phase 5.1 "Limits & large deltas" section)
 testdata/
   main.tf                # Example Terraform exercising all 7 resource types
   base/ + head/          # Scenario: SG opened + LB added (high risk)
@@ -671,6 +703,12 @@ Running against `testdata/main.tf` produces 9 nodes, 11 edges, confidence 1.0:
 
 29. **Mode = advisory by default, blocking is opt-in and only fails on `fail`.** `runComment`'s `--mode blocking` exits 1 only when `risk.Status == "fail"`. `warn` is intentionally non-blocking even in blocking mode -- master.md §11 reserves enforcement for the `fail` tier so warnings remain warnings. The Action's `mode` input mirrors this 1:1.
 
+## Design Decisions to Preserve (Phase 5.1)
+
+30. **Cap by bytes, not by node count.** Both safety nets (`MermaidBudget`, `commentBodyBudget`) trigger on rendered byte size, not on `len(d.AddedNodes)+...`. Reason: the actual external limits we are defending against (mermaid-js `maxTextSize=50_000`, GitHub mediumblob `262_144`) are byte limits. A node-count threshold would either fire too early on small-but-verbose deltas or too late on densely-edged ones. The diagram density cap proves a render with a candidate set, measures it, and only then decides to drop more -- never extrapolates from node count.
+
+31. **Truncation must be visible in the artifact, never silent.** Both the diagram cap and the body safety net leave an explicit, plain-text marker in their output: `_architex_truncated[...]:::truncated` for the diagram, `_Diagram omitted: rendered comment was N bytes..._` for the body, and `_[ArchiteX comment truncated to fit GitHub size limit -- see audit bundle artifact for the full report.]_` for the hard fallback. The full unsanitized diagram is ALWAYS in the audit bundle artifact (which `actions/upload-artifact@v4` posts independently of the comment), so nothing is lost -- only relocated. If you change the markers, also update `scripts/stress-mermaid.ps1`'s `DiagramCapped` detection regex (`_architex_truncated`) and the `TestCapCommentBody_*` assertions, otherwise the regression probe goes blind.
+
 ## Hardening Pass (Pre-Phase-4)
 
 Done before starting Phase 4. No rule semantics or scoring weights changed; this was a structural cleanup.
@@ -695,7 +733,8 @@ Done before starting Phase 4. No rule semantics or scoring weights changed; this
 
 - No LLM-powered summaries (Phase 6: `LLMInterpreter` against the existing `Interpreter` interface)
 - No GitHub App, no webhook server, no SaaS posting -- the GitHub Action is the only integration surface
-- No multi-layer dependency expansion in the diagram (currently: changed/added/removed nodes plus direct edge endpoints only)
+- No multi-layer dependency expansion in the diagram (currently: changed/added/removed nodes plus direct edge endpoints only; bounded above by `interpreter.MermaidBudget` since Phase 5.1)
+- No collapse of repetitive review-focus enumerations -- a PR adding 400 LBs still produces a single bullet listing 400 names. The comment body cap (Phase 5.1) catches the worst case at 240 KB but the readability problem is unaddressed; a "summarize after K items" pass is a candidate for Phase 5.2 if it shows up in real usage.
 - No module support (warned, skipped)
 - No `for_each` / `count` support (warned, resource skipped)
 - No `dynamic` block support (warned, resource skipped)

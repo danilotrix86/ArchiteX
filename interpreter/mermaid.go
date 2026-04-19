@@ -54,6 +54,16 @@ type rendered struct {
 	Status       nodeStatus
 }
 
+// MermaidBudget is the default soft byte budget for a rendered Mermaid block.
+//
+// Mermaid-js refuses to render diagrams whose source exceeds its `maxTextSize`
+// configuration (default 50,000 chars). Above that threshold GitHub displays
+// "Maximum text size in diagram exceeded" instead of the diagram. We default
+// to 45,000 so we stay clear of that cliff with a 5,000-char safety margin.
+//
+// Callers can override by calling RenderMermaidBudgeted directly.
+const MermaidBudget = 45_000
+
 // RenderMermaid produces a deterministic Mermaid `flowchart LR` representation
 // of the delta. Output is byte-identical for identical input.
 //
@@ -65,18 +75,71 @@ type rendered struct {
 //
 // Edges directly added or removed by the delta are rendered. Their endpoints
 // always appear in the diagram, even when one endpoint is unchanged context.
+//
+// This function does NOT enforce any size budget -- for large deltas the
+// output may exceed mermaid-js's renderer limit. Use RenderMermaidBudgeted
+// when posting to a renderer with a known cap (e.g. GitHub PR comments).
 func RenderMermaid(d delta.Delta) string {
 	nodes := collectNodes(d)
 	edges := collectEdges(d)
+	return renderFromSets(nodes, edges, truncationNotice{})
+}
 
+// RenderMermaidBudgeted is like RenderMermaid but guarantees the rendered
+// block stays at or below maxBytes. If the full delta would exceed the
+// budget, lower-priority nodes are dropped and a placeholder node is appended
+// announcing the truncation; the placeholder is part of the trust surface so
+// readers can always tell when content was hidden.
+//
+// Priority order (highest first):
+//  1. status: changed > added > removed > context
+//  2. abstract type impact: entry_point > data > compute > network > access_control
+//  3. original ID alphabetically (stable tiebreaker)
+//
+// Edges are kept only when both endpoints are in the kept-node set.
+//
+// Pass MermaidBudget for the default 45,000-byte threshold.
+func RenderMermaidBudgeted(d delta.Delta, maxBytes int) string {
+	nodes := collectNodes(d)
+	edges := collectEdges(d)
+
+	full := renderFromSets(nodes, edges, truncationNotice{})
+	if maxBytes <= 0 || len(full) <= maxBytes {
+		return full
+	}
+
+	keptNodes, keptEdges, hiddenNodes, hiddenEdges := budgetFit(nodes, edges, maxBytes)
+	notice := truncationNotice{
+		active:       true,
+		hiddenNodes:  hiddenNodes,
+		hiddenEdges:  hiddenEdges,
+		totalNodes:   len(nodes),
+		totalEdges:   len(edges),
+	}
+	return renderFromSets(keptNodes, keptEdges, notice)
+}
+
+// truncationNotice is rendered as a placeholder node at the end of the
+// diagram when budgetFit dropped content. Zero-value = no notice.
+type truncationNotice struct {
+	active                   bool
+	hiddenNodes, hiddenEdges int
+	totalNodes, totalEdges   int
+}
+
+// renderFromSets is the shared rendering core. It is the only place that
+// emits Mermaid syntax; both RenderMermaid and RenderMermaidBudgeted go
+// through here, guaranteeing byte-identical output for identical inputs.
+func renderFromSets(nodes []rendered, edges []renderedEdge, notice truncationNotice) string {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
 	b.WriteString("    classDef added stroke:#28a745,stroke-width:2px\n")
 	b.WriteString("    classDef removed stroke:#dc3545,stroke-width:2px,stroke-dasharray: 5 5\n")
 	b.WriteString("    classDef changed stroke:#d39e00,stroke-width:2px\n")
 	b.WriteString("    classDef context stroke:#6c757d,stroke-width:1px\n")
+	b.WriteString("    classDef truncated stroke:#6f42c1,stroke-width:2px,stroke-dasharray: 2 2\n")
 
-	if len(nodes) == 0 && len(edges) == 0 {
+	if len(nodes) == 0 && len(edges) == 0 && !notice.active {
 		b.WriteString("    empty[\"no architectural changes\"]:::context\n")
 		return b.String()
 	}
@@ -104,7 +167,135 @@ func RenderMermaid(d delta.Delta) string {
 		}
 	}
 
+	if notice.active {
+		b.WriteString("\n")
+		fmt.Fprintf(&b,
+			"    _architex_truncated[\"... and %d more node(s), %d more edge(s) hidden -- full diagram in audit bundle\"]:::truncated\n",
+			notice.hiddenNodes, notice.hiddenEdges,
+		)
+	}
+
 	return b.String()
+}
+
+// typePriority returns a sort key for abstract types: lower = higher priority
+// when keeping nodes within a budget. The order reflects PR-review impact:
+// public-facing entry points and data stores matter most, infrastructure
+// scaffolding least.
+func typePriority(abstractType string) int {
+	switch abstractType {
+	case "entry_point":
+		return 0
+	case "data":
+		return 1
+	case "compute":
+		return 2
+	case "network":
+		return 3
+	case "access_control":
+		return 4
+	default:
+		return 5
+	}
+}
+
+// statusPriority returns a sort key for node status: lower = higher priority.
+// changed/added/removed all rank above unchanged-context endpoints.
+func statusPriority(s nodeStatus) int {
+	switch s {
+	case statusChanged:
+		return 0
+	case statusAdded:
+		return 1
+	case statusRemoved:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// budgetFit greedily selects the highest-priority nodes (and the subset of
+// edges whose endpoints are both kept) such that renderFromSets on the
+// returned sets, plus a truncation placeholder, fits within maxBytes.
+//
+// Returns the kept nodes, kept edges, and counts of hidden nodes/edges for
+// the placeholder. Always keeps at least one node so the diagram never
+// degenerates to "no architectural changes" when there were in fact changes.
+func budgetFit(nodes []rendered, edges []renderedEdge, maxBytes int) ([]rendered, []renderedEdge, int, int) {
+	prioritized := make([]rendered, len(nodes))
+	copy(prioritized, nodes)
+	slices.SortFunc(prioritized, func(a, b rendered) int {
+		if d := statusPriority(a.Status) - statusPriority(b.Status); d != 0 {
+			return d
+		}
+		if d := typePriority(a.AbstractType) - typePriority(b.AbstractType); d != 0 {
+			return d
+		}
+		return strings.Compare(a.OriginalID, b.OriginalID)
+	})
+
+	// Index edges by endpoints for O(1) lookup during the fit loop.
+	type edgeKey struct{ from, to string }
+	edgesByEndpoints := make(map[edgeKey][]renderedEdge, len(edges))
+	for _, e := range edges {
+		k := edgeKey{from: sanitizeID(e.from), to: sanitizeID(e.to)}
+		edgesByEndpoints[k] = append(edgesByEndpoints[k], e)
+	}
+
+	keptNodeIDs := make(map[string]bool)
+	var keptNodes []rendered
+	var keptEdges []renderedEdge
+
+	tryFit := func(extra rendered) ([]rendered, []renderedEdge, bool) {
+		candidateNodes := append(append([]rendered{}, keptNodes...), extra)
+		// Re-sort kept nodes for deterministic output (renderFromSets does
+		// not sort itself).
+		slices.SortFunc(candidateNodes, func(a, b rendered) int {
+			return strings.Compare(a.OriginalID, b.OriginalID)
+		})
+		ids := make(map[string]bool, len(candidateNodes))
+		for _, n := range candidateNodes {
+			ids[n.ID] = true
+		}
+		// Re-derive kept edges: an edge is kept iff both endpoints are in
+		// the kept-node set. We deterministically walk the original edges
+		// list to preserve their existing sort order.
+		var candidateEdges []renderedEdge
+		for _, e := range edges {
+			if ids[sanitizeID(e.from)] && ids[sanitizeID(e.to)] {
+				candidateEdges = append(candidateEdges, e)
+			}
+		}
+		notice := truncationNotice{
+			active:      true,
+			hiddenNodes: len(nodes) - len(candidateNodes),
+			hiddenEdges: len(edges) - len(candidateEdges),
+		}
+		out := renderFromSets(candidateNodes, candidateEdges, notice)
+		return candidateNodes, candidateEdges, len(out) <= maxBytes
+	}
+
+	for _, n := range prioritized {
+		nextNodes, nextEdges, ok := tryFit(n)
+		if !ok {
+			break
+		}
+		keptNodes = nextNodes
+		keptEdges = nextEdges
+		keptNodeIDs[n.ID] = true
+	}
+
+	// Guarantee at least one node so we don't emit an "empty" diagram when
+	// changes do exist. Pick the highest-priority node even if it overflows
+	// slightly (the placeholder + classDefs add ~400 bytes; the alternative
+	// is a misleading diagram).
+	if len(keptNodes) == 0 && len(prioritized) > 0 {
+		keptNodes = []rendered{prioritized[0]}
+	}
+
+	hiddenNodes := len(nodes) - len(keptNodes)
+	hiddenEdges := len(edges) - len(keptEdges)
+	return keptNodes, keptEdges, hiddenNodes, hiddenEdges
 }
 
 // collectNodes builds the deterministic list of nodes to emit. Status

@@ -52,7 +52,7 @@ func Render(d delta.Delta, r risk.RiskResult, interp Interpreter) Report {
 	return Report{
 		Delta:       d,
 		Risk:        r,
-		Diagram:     RenderMermaid(d),
+		Diagram:     RenderMermaidBudgeted(d, MermaidBudget),
 		Summary:     interp.Summary(d, r),
 		ReviewFocus: focus,
 	}

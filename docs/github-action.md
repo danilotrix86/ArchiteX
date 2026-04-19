@@ -124,6 +124,19 @@ GITHUB_TOKEN=ghp_xxx ./architex comment ./.architex/<bundle> \
 
 This makes Action issues debuggable on a developer laptop without needing to push commits to test.
 
+## Limits & large deltas
+
+ArchiteX defends two real limits that affect large PRs (think: bulk migrations, environment forks, or refactors touching 100+ resources):
+
+| Limit | Source | What ArchiteX does |
+|---|---|---|
+| **mermaid-js `maxTextSize`** = 50,000 chars (default in [mermaid-cli/issues/113](https://github.com/mermaid-js/mermaid-cli/issues/113)). Above this, GitHub renders "Maximum text size in diagram exceeded" instead of your diagram. | Used by GitHub's Markdown renderer for `\`\`\`mermaid` blocks. | The renderer caps the Mermaid block at **45,000 chars** (5 KB safety margin). When the cap engages, lower-priority nodes (and any orphaned edges) are dropped and the diagram gains an explicit `_architex_truncated` placeholder node announcing the hidden counts. Priority order: `changed > added > removed > context`, then `entry_point > data > compute > network > access_control`, then ID alphabetically. |
+| **GitHub comment body** = 262,144 bytes (a `mediumblob` in MySQL; see [community/27190](https://github.community/t/maximum-length-for-the-comment-body-in-issues-and-pr/148867)). The frequently-cited "65,536 chars" is the worst-case 4-byte-per-char view of the same number; for ASCII-dominated bodies the byte limit dominates. | Hard rejection on POST. | The `architex comment` subcommand caps the body at **240,000 bytes** (22 KB safety margin). When the cap engages, the diagram block is stripped from the comment and replaced with `_Diagram omitted: rendered comment was N bytes (over the 240,000-byte safety budget). Full diagram is in the ArchiteX audit bundle artifact._`. The sticky-marker footer is preserved, so the next run still updates the same comment in place. If even that is not enough, a hard truncate with a visible marker is the last resort. |
+
+In every case the **full, untruncated** diagram is in the audit bundle artifact (`actions/upload-artifact@v4`), uploaded by the Action regardless of whether the comment was capped. Trust is preserved; only presentation is reduced.
+
+You can verify the caps locally with `scripts/stress-mermaid.ps1` -- it generates synthetic deltas of any N and prints the byte sizes plus a `DiagramCapped` flag.
+
 ## Limitations (Phase 5 scope)
 
 - AWS Terraform resources only -- the supported subset is documented in `llm.md` ("Supported Resources").
