@@ -198,7 +198,7 @@ func buildBaseHead(baseDir, headDir string) (models.Graph, models.Graph, int) {
 }
 
 func logRisk(r risk.RiskResult) {
-	fmt.Fprintf(os.Stderr, "[architex] score: %.1f | severity: %s | status: %s\n",
+	fmt.Fprintf(os.Stderr, "[architex] risk level: %.1f/10 (higher = more risk) | severity: %s | status: %s\n",
 		r.Score, r.Severity, r.Status)
 	for _, reason := range r.Reasons {
 		fmt.Fprintf(os.Stderr, "[architex]   [%.1f] %s -- %s\n", reason.Weight, reason.RuleID, reason.Message)

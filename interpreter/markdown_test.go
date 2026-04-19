@@ -12,7 +12,7 @@ func TestFormatMarkdown_AllFiveSectionsPresent(t *testing.T) {
 	md := FormatMarkdown(rep)
 
 	mustContain := []string{
-		"## [FAIL] Risk Score: HIGH (9.0 / 10)",
+		"## [FAIL] Risk Level: HIGH (9.0/10 &mdash; higher means more risk)",
 		"## Plain-English Summary",
 		"## Suggested Review Focus",
 		"## Delta Diagram",
@@ -72,7 +72,7 @@ func TestFormatMarkdown_BannerStatusReflectsRisk(t *testing.T) {
 	// dbAdded scores 2.5 -> low/pass, not medium. Use a synthetic medium fixture
 	// would require constructing a 3.0+ delta; instead assert the boundary
 	// behavior we have.
-	if got := FormatMarkdown(dbRep); !strings.Contains(got, "Risk Score: LOW") || !strings.Contains(got, "**pass**") {
+	if got := FormatMarkdown(dbRep); !strings.Contains(got, "Risk Level: LOW") || !strings.Contains(got, "**pass**") {
 		t.Errorf("db-added banner should be LOW/pass, got:\n%s", got)
 	}
 	if got := FormatMarkdown(emptyRep); !strings.Contains(got, "[OK]") || !strings.Contains(got, "**pass**") {

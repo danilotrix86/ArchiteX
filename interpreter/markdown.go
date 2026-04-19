@@ -58,7 +58,7 @@ func renderRiskBanner(r risk.RiskResult) string {
 		icon = "[FAIL]"
 	}
 	return fmt.Sprintf(
-		"## %s Risk Score: %s (%.1f / 10)\n\nStatus: **%s** &middot; Severity: **%s**\n",
+		"## %s Risk Level: %s (%.1f/10 &mdash; higher means more risk)\n\nStatus: **%s** &middot; Severity: **%s**\n",
 		icon,
 		strings.ToUpper(r.Severity),
 		r.Score,

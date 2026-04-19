@@ -384,7 +384,7 @@ type DeterministicInterpreter struct{} // default; template-based, no I/O
 
 Five sections in a fixed order, every PR:
 
-1. **Risk Score banner** -- `## [OK|WARN|FAIL] Risk Score: <SEVERITY> (X.X / 10)` plus status/severity line
+1. **Risk Level banner** -- `## [OK|WARN|FAIL] Risk Level: <SEVERITY> (X.X/10 &mdash; higher means more risk)` plus status/severity line. The "higher means more risk" qualifier is intentional UX -- without it, non-technical reviewers misread "9.0/10" as a school-grade-style high mark instead of a danger signal.
 2. **Plain-English Summary** -- single paragraph from `DeterministicInterpreter.Summary`
 3. **Suggested Review Focus** -- ordered bullets from `DeterministicInterpreter.ReviewFocus`, sorted by rule weight descending
 4. **Delta Diagram** -- the Mermaid source wrapped in a fenced ` ```mermaid ` block
