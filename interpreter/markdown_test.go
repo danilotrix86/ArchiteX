@@ -52,10 +52,10 @@ func TestFormatMarkdown_EmptyDeltaProducesStableShape(t *testing.T) {
 
 func TestFormatMarkdown_BannerStatusReflectsRisk(t *testing.T) {
 	cases := []struct {
-		name        string
-		delta       func() interface{}
-		wantBanner  string
-		wantStatus  string
+		name       string
+		delta      func() interface{}
+		wantBanner string
+		wantStatus string
 	}{
 		{"high", nil, "[FAIL]", "**fail**"},
 		{"medium", nil, "[WARN]", "**warn**"},

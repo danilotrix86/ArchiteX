@@ -226,4 +226,3 @@ func decodeBody(t *testing.T, r *http.Request) string {
 	}
 	return got.Body
 }
-

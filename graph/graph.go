@@ -178,4 +178,3 @@ func computeConfidence(warnings []models.Warning) models.Confidence {
 		Warnings: warnings,
 	}
 }
-

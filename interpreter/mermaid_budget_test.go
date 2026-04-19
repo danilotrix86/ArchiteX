@@ -122,4 +122,3 @@ func TestRenderMermaidBudgeted_KeepsEdgesOnlyWhenBothEndpointsKept(t *testing.T)
 		}
 	}
 }
-

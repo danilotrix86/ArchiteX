@@ -27,7 +27,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/architex@v1
+      - uses: danilotrix86/ArchiteX@v1
         with:
           terraform-dir: infra
 ```
@@ -66,14 +66,14 @@ permissions:
 
 If you only want the artifact and no PR comment, you can drop `pull-requests: write` and set `comment: false`.
 
-## Rollout pattern (matches `master.md` §11)
+## Rollout pattern (matches [master.md §7](../master.md#7-rollout-strategy))
 
 ArchiteX is meant to be adopted in three phases. The Action makes each one a one-line change.
 
 ### Phase 1 -- Visibility
 
 ```yaml
-- uses: <owner>/architex@v1
+- uses: danilotrix86/ArchiteX@v1
   with:
     terraform-dir: infra
     mode: advisory     # default; never fails the check
@@ -88,7 +88,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 ### Phase 3 -- Enforced governance
 
 ```yaml
-- uses: <owner>/architex@v1
+- uses: danilotrix86/ArchiteX@v1
   with:
     terraform-dir: infra
     mode: blocking     # exits non-zero when risk.Status == "fail"
@@ -96,7 +96,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 
 Add the job as a required status check in your branch protection rules. PRs whose risk evaluates to `fail` cannot be merged.
 
-> `warn` is intentionally non-blocking even in `blocking` mode. `master.md` §11 reserves enforcement for the `fail` tier so warnings remain warnings.
+> `warn` is intentionally non-blocking even in `blocking` mode. Enforcement is reserved for the `fail` tier so warnings remain warnings.
 
 ## Sticky comment behavior
 
@@ -137,9 +137,52 @@ In every case the **full, untruncated** diagram is in the audit bundle artifact 
 
 You can verify the caps locally with `scripts/stress-mermaid.ps1` -- it generates synthetic deltas of any N and prints the byte sizes plus a `DiagramCapped` flag.
 
-## Limitations (Phase 5 scope)
+## Supported resources
 
-- AWS Terraform resources only -- the supported subset is documented in `llm.md` ("Supported Resources").
-- `module`, `for_each`, `count`, and `dynamic` blocks emit warnings and are skipped (see "Unsupported Constructs" in `llm.md`).
-- The diagram is one-layer (changed nodes plus direct edge endpoints); deeper dependency expansion is on the roadmap.
-- Multi-provider, GitLab, Bitbucket, and non-Terraform IaC are out of scope for the MVP.
+ArchiteX v1 handles the canonical 3-tier AWS stack:
+
+| Terraform type | Abstract type |
+|---|---|
+| `aws_vpc` | `network` |
+| `aws_subnet` | `network` |
+| `aws_security_group` | `access_control` |
+| `aws_security_group_rule` | `access_control` |
+| `aws_instance` | `compute` |
+| `aws_lb` | `entry_point` |
+| `aws_db_instance` | `data` |
+
+Unsupported resource types are logged as warnings (category `unsupported_resource`) and reduce the confidence score; they do not cause failures.
+
+### Unsupported constructs
+
+These Terraform constructs are detected and warned about, not silently skipped:
+
+| Construct | Result |
+|---|---|
+| `for_each` / `count` on a resource | Resource skipped (warning) |
+| `dynamic` nested block | Resource skipped (warning) |
+| `module` block | No resource produced (warning) |
+| Unknown resource type | Resource skipped (warning) |
+
+## Limitations
+
+- AWS Terraform resources only (see table above). Broader coverage is planned for v1.1.
+- The diagram shows one layer of dependencies (changed nodes plus direct edge endpoints); deeper expansion is on the roadmap.
+- Multi-provider, GitLab, Bitbucket, and non-Terraform IaC are out of scope for v1.
+
+## Versioning
+
+ArchiteX uses two tag schemes:
+
+- **Immutable tags** (`v1.0.0`, `v1.1.0`, ...) point at a single commit forever. Use these when you need full reproducibility.
+- **Floating major tag** (`v1`) points at the latest `v1.x.x` release and is advanced manually after each minor/patch release. Use this for convenience -- it always gets you the latest compatible version.
+
+In your workflow:
+
+```yaml
+# Recommended: floating major tag (always latest v1.x)
+- uses: danilotrix86/ArchiteX@v1
+
+# Pinned: exact version (immutable)
+- uses: danilotrix86/ArchiteX@v1.0.0
+```

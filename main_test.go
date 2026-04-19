@@ -75,10 +75,10 @@ func TestCapCommentBody_BudgetZeroMeansNoCap(t *testing.T) {
 
 func TestSplitRepoSlug(t *testing.T) {
 	cases := []struct {
-		in     string
-		owner  string
-		name   string
-		ok     bool
+		in    string
+		owner string
+		name  string
+		ok    bool
 	}{
 		{"acme/widgets", "acme", "widgets", true},
 		{"acme/", "", "", false},

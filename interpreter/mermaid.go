@@ -110,11 +110,11 @@ func RenderMermaidBudgeted(d delta.Delta, maxBytes int) string {
 
 	keptNodes, keptEdges, hiddenNodes, hiddenEdges := budgetFit(nodes, edges, maxBytes)
 	notice := truncationNotice{
-		active:       true,
-		hiddenNodes:  hiddenNodes,
-		hiddenEdges:  hiddenEdges,
-		totalNodes:   len(nodes),
-		totalEdges:   len(edges),
+		active:      true,
+		hiddenNodes: hiddenNodes,
+		hiddenEdges: hiddenEdges,
+		totalNodes:  len(nodes),
+		totalEdges:  len(edges),
 	}
 	return renderFromSets(keptNodes, keptEdges, notice)
 }

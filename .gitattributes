@@ -1,0 +1,11 @@
+# Enforce LF line endings for all text files so Windows checkouts
+# don't dirty the tree with CRLF diffs.
+*.go    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.tf    text eol=lf
+*.ps1   text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf

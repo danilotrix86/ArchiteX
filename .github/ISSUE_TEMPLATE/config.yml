@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Design discussions
+    url: https://github.com/danilotrix86/ArchiteX/discussions
+    about: Broader design questions, roadmap proposals, and use-case discussions

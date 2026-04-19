@@ -74,10 +74,10 @@ func TestRenderMermaid_RemovedEdgeUsesDashedArrow(t *testing.T) {
 
 func TestSanitizeID_ReplacesNonIdentifierChars(t *testing.T) {
 	cases := map[string]string{
-		"aws_security_group.web":   "aws_security_group_web",
-		"aws_lb.web-prod":          "aws_lb_web_prod",
+		"aws_security_group.web":    "aws_security_group_web",
+		"aws_lb.web-prod":           "aws_lb_web_prod",
 		"module.foo.aws_instance.x": "module_foo_aws_instance_x",
-		"already_safe_id":          "already_safe_id",
+		"already_safe_id":           "already_safe_id",
 	}
 	for in, want := range cases {
 		if got := sanitizeID(in); got != want {
@@ -85,4 +85,3 @@ func TestSanitizeID_ReplacesNonIdentifierChars(t *testing.T) {
 		}
 	}
 }
-

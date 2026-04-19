@@ -8,7 +8,8 @@
 //
 // Trust model: this package is the ONLY place in architex that performs
 // outbound network calls. The analysis pipeline (parser/graph/delta/risk/
-// interpreter) never imports it. See llm.md design decision 27.
+// interpreter) never imports this package. This is the structural
+// enforcement of the zero-exfiltration guarantee (master.md §6).
 package github
 
 import (
