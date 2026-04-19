@@ -1,0 +1,148 @@
+name: ArchiteX
+description: Architecture firewall for Terraform PRs. Posts a deterministic risk report as a sticky PR comment and uploads an audit bundle.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  terraform-dir:
+    description: 'Subdirectory (relative to repo root) that contains the Terraform .tf files to analyze. Use "." for the repo root.'
+    required: false
+    default: '.'
+  base-ref:
+    description: 'Git ref for the base side of the diff. Defaults to the PR base SHA when triggered by pull_request.'
+    required: false
+    default: ${{ github.event.pull_request.base.sha }}
+  head-ref:
+    description: 'Git ref for the head side of the diff. Defaults to the PR head SHA when triggered by pull_request.'
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  mode:
+    description: '"advisory" (default) never fails the check. "blocking" fails the check when risk.Status == "fail".'
+    required: false
+    default: advisory
+  comment:
+    description: 'When "true", post the Markdown report as a sticky PR comment. Set to "false" to suppress (artifact upload still runs).'
+    required: false
+    default: 'true'
+  upload-artifact:
+    description: 'When "true", upload the audit bundle (diagram, summary, score, egress, manifest) as a workflow artifact.'
+    required: false
+    default: 'true'
+  salt:
+    description: 'Salt used by the sanitizer when hashing IDs in the egress payload. Empty = stable IDs across runs (good for trend diffing).'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to post the PR comment. Defaults to the workflow GITHUB_TOKEN. Requires pull-requests:write.'
+    required: false
+    default: ${{ github.token }}
+  go-version-file:
+    description: 'Path passed to actions/setup-go go-version-file input. Defaults to the action''s own go.mod.'
+    required: false
+    default: ''
+
+outputs:
+  bundle-path:
+    description: 'Filesystem path of the produced audit bundle directory.'
+    value: ${{ steps.report.outputs.bundle-path }}
+  status:
+    description: 'risk.Status from the report: pass | warn | fail.'
+    value: ${{ steps.report.outputs.status }}
+  score:
+    description: 'risk.Score from the report (0.0 - 10.0).'
+    value: ${{ steps.report.outputs.score }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout head
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.head-ref }}
+        path: .architex-work/head
+        fetch-depth: 1
+
+    - name: Checkout base
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.base-ref }}
+        path: .architex-work/base
+        fetch-depth: 1
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.go-version-file != '' && inputs.go-version-file || format('{0}/go.mod', github.action_path) }}
+
+    - name: Build architex
+      id: build
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        go build -o "${RUNNER_TEMP}/architex" .
+        echo "binary=${RUNNER_TEMP}/architex" >> "$GITHUB_OUTPUT"
+
+    - name: Run report (parse + diff + score + render + audit)
+      id: report
+      shell: bash
+      env:
+        ARCHITEX: ${{ steps.build.outputs.binary }}
+        BASE_TF: ${{ github.workspace }}/.architex-work/base/${{ inputs.terraform-dir }}
+        HEAD_TF: ${{ github.workspace }}/.architex-work/head/${{ inputs.terraform-dir }}
+        OUT_DIR: ${{ github.workspace }}/.architex
+        SALT: ${{ inputs.salt }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${OUT_DIR}"
+        "${ARCHITEX}" report "${BASE_TF}" "${HEAD_TF}" --out "${OUT_DIR}" --salt "${SALT}" > /dev/null
+        BUNDLE="$(ls -td "${OUT_DIR}"/*/ | head -1 | sed 's:/*$::')"
+        if [ -z "${BUNDLE}" ] || [ ! -f "${BUNDLE}/summary.md" ]; then
+          echo "::error::architex report did not produce a bundle with summary.md"
+          exit 1
+        fi
+        echo "bundle-path=${BUNDLE}" >> "$GITHUB_OUTPUT"
+        STATUS="$(jq -r .status "${BUNDLE}/score.json")"
+        SCORE="$(jq -r .score  "${BUNDLE}/score.json")"
+        SEVERITY="$(jq -r .severity "${BUNDLE}/score.json")"
+        echo "status=${STATUS}"     >> "$GITHUB_OUTPUT"
+        echo "score=${SCORE}"       >> "$GITHUB_OUTPUT"
+        echo "severity=${SEVERITY}" >> "$GITHUB_OUTPUT"
+        {
+          echo "## ArchiteX"
+          echo ""
+          echo "- Status: \`${STATUS}\`"
+          echo "- Severity: \`${SEVERITY}\`"
+          echo "- Score: \`${SCORE}/10\`"
+          echo "- Bundle: \`${BUNDLE}\`"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post sticky PR comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        ARCHITEX: ${{ steps.build.outputs.binary }}
+        BUNDLE: ${{ steps.report.outputs.bundle-path }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        MODE: ${{ inputs.mode }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        "${ARCHITEX}" comment "${BUNDLE}" --repo "${REPO}" --pr "${PR}" --mode "${MODE}"
+
+    - name: Enforce blocking mode (no PR context)
+      if: ${{ inputs.mode == 'blocking' && github.event_name != 'pull_request' && steps.report.outputs.status == 'fail' }}
+      shell: bash
+      run: |
+        echo "::error::ArchiteX blocking mode: risk.Status=fail"
+        exit 1
+
+    - name: Upload audit bundle
+      if: ${{ inputs.upload-artifact == 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: architex-audit-${{ github.run_id }}
+        path: ${{ github.workspace }}/.architex/
+        if-no-files-found: warn
+        retention-days: 30
