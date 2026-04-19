@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "$id": "https://architex.dev/schemas/egress/v1.0.0.json",
+  "title": "ArchiteX Egress Payload",
+  "description": "The ONLY data shape that may leave a customer CI runner. Every field is allowlisted. New fields require updating both this document and interpreter.EgressPayload; the test suite enforces parity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "score",
+    "severity",
+    "status",
+    "reason_codes",
+    "added_nodes",
+    "removed_nodes",
+    "changed_nodes",
+    "added_edges",
+    "removed_edges",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "description": "Semver of this schema." },
+    "score":          { "type": "number", "minimum": 0, "maximum": 10 },
+    "severity":       { "type": "string", "enum": ["low", "medium", "high"] },
+    "status":         { "type": "string", "enum": ["pass", "warn", "fail"] },
+    "reason_codes":   {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Triggered rule IDs only. Free-form RiskReason messages MUST NOT be transmitted."
+    },
+    "added_nodes":   { "type": "array", "items": { "$ref": "#/definitions/sanitized_node" } },
+    "removed_nodes": { "type": "array", "items": { "$ref": "#/definitions/sanitized_node" } },
+    "changed_nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "changed_attribute_keys"],
+        "properties": {
+          "id":   { "type": "string", "pattern": "^n_[0-9a-f]{8}$" },
+          "type": { "type": "string", "description": "Abstract type from models.AbstractionMap." },
+          "changed_attribute_keys": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Attribute names that changed. Values are intentionally omitted."
+          }
+        }
+      }
+    },
+    "added_edges":   { "type": "array", "items": { "$ref": "#/definitions/sanitized_edge" } },
+    "removed_edges": { "type": "array", "items": { "$ref": "#/definitions/sanitized_edge" } },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added_nodes", "removed_nodes", "added_edges", "removed_edges", "changed_nodes"],
+      "properties": {
+        "added_nodes":   { "type": "integer", "minimum": 0 },
+        "removed_nodes": { "type": "integer", "minimum": 0 },
+        "added_edges":   { "type": "integer", "minimum": 0 },
+        "removed_edges": { "type": "integer", "minimum": 0 },
+        "changed_nodes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "definitions": {
+    "sanitized_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id":   { "type": "string", "pattern": "^n_[0-9a-f]{8}$", "description": "Salted SHA-256 prefix of the original Terraform ID." },
+        "type": { "type": "string", "description": "Abstract type from models.AbstractionMap." }
+      }
+    },
+    "sanitized_edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "type"],
+      "properties": {
+        "from": { "type": "string", "pattern": "^n_[0-9a-f]{8}$" },
+        "to":   { "type": "string", "pattern": "^n_[0-9a-f]{8}$" },
+        "type": { "type": "string", "description": "Edge label from graph edge inference." }
+      }
+    }
+  }
+}

@@ -6,9 +6,9 @@ Use this document to onboard into what has been built so far. Read it fully befo
 
 A DevSecOps CLI tool that parses Terraform (`.tf`) files, builds an architecture graph, computes semantic deltas between graph versions, and evaluates architectural risk. It runs locally or in CI. It is NOT a full Terraform interpreter -- it handles a narrow, curated subset of constructs.
 
-## Current Phase: Phase 3 (COMPLETE) + Pre-Phase-4 Hardening
+## Current Phase: Phase 4 (COMPLETE)
 
-Phase 3 delivers the Risk Engine -- deterministic, rule-based evaluation of a Delta to produce a scored, explainable risk assessment. A pre-Phase-4 hardening pass tightened the foundation without changing any rule semantics. See [Hardening Pass](#hardening-pass-pre-phase-4) below.
+Phase 4 delivers Stage 4 of the pipeline -- the deterministic Interpreter Layer. Given a `delta.Delta` and a `risk.RiskResult`, it produces a Mermaid delta diagram, a plain-English summary, reviewer-focus bullets, a Markdown PR comment, a sanitized egress payload (with a published JSON Schema), and an on-disk audit bundle. There is no LLM, no network, and no GitHub integration in this phase -- those are Phase 5/6. The `Interpreter` interface is the seam where an LLM provider can be slotted in later without touching the diagram, sanitizer, or formatter.
 
 ### Phase 1 (COMPLETE)
 
@@ -41,6 +41,19 @@ Phase 3 delivers the Risk Engine -- deterministic, rule-based evaluation of a De
 - Reasons sorted by weight descending, rule ID ascending for ties
 - 7 unit tests covering all rules, edge cases, and score capping
 
+### Phase 4 (COMPLETE)
+
+- Deterministic Interpreter Layer via `interpreter.Render(d, r, interp) Report`
+- Mermaid `flowchart LR` renderer for the delta sub-graph (added/removed/changed/context nodes, dashed arrows for removed edges)
+- Plain-English summary + review-focus bullets templated from `RiskReason` + `delta.Delta` (no free-form text parsing)
+- Markdown PR-comment formatter producing the five sections from `master.md` §10.1
+- `EgressPayload` + `Sanitize()` with name hashing (salted SHA-256, 32-bit prefix), abstract-type-only metadata, rule IDs only (no message text), no attribute values
+- Published `docs/egress-schema.json` (JSON Schema draft-07) -- a parity test fails the build if `EgressPayload` and the schema diverge
+- `Interpreter` interface (`Summary`, `ReviewFocus`) -- `DeterministicInterpreter` is the default; the diagram is intentionally NOT routed through this interface (trust surface)
+- Audit artifact writer (`WriteAudit`) producing a timestamped bundle: `diagram.mmd`, `summary.md`, `score.json`, `egress.json`, `manifest.json` with SHA-256 checksums
+- Two new CLI subcommands: `architex report` (Markdown to stdout, optional `--out` for audit bundle) and `architex sanitize` (egress JSON to stdout)
+- 29 unit tests across 5 files covering renderer determinism, summary/focus templating, Markdown shape, no-leak sanitization, schema parity, audit checksums, and the Interpreter seam
+
 ## Tech Stack
 
 - Language: Go 1.26
@@ -53,7 +66,7 @@ Phase 3 delivers the Risk Engine -- deterministic, rule-based evaluation of a De
 ```
 go.mod
 go.sum
-main.go                  # CLI entry point with subcommands: graph | diff | score
+main.go                  # CLI entry point: graph | diff | score | report | sanitize
 models/models.go         # Core shared types (Graph, Node, Edge, Confidence, Warning, RawResource)
 parser/parser.go         # HCL file/dir parsing, resource + reference extraction
 parser/extract.go        # Attribute eval, nested-block walk, reference traversal helpers
@@ -61,6 +74,13 @@ graph/graph.go           # Graph construction (nodes, edges, derived attrs, conf
 delta/delta.go           # Delta Engine: Compare(), HumanSummary(), delta types
 risk/risk.go             # Risk Engine: Evaluate(), scoring, severity/status, JSON formatting
 risk/rules.go            # 5 rule implementations
+interpreter/interpreter.go  # Stage 4: Report struct, Interpreter interface, Render()
+interpreter/mermaid.go      # Deterministic Mermaid flowchart renderer
+interpreter/summary.go      # DeterministicInterpreter (Summary + ReviewFocus templates)
+interpreter/markdown.go     # Five-section PR-comment formatter
+interpreter/sanitize.go     # EgressPayload + Sanitize() (name hashing, allowlisted fields)
+interpreter/audit.go        # WriteAudit() -- timestamped bundle with manifest checksums
+docs/egress-schema.json     # Published JSON Schema for EgressPayload (parity-tested)
 testdata/
   main.tf                # Example Terraform exercising all 7 resource types
   base/ + head/          # Scenario: SG opened + LB added (high risk)
@@ -70,7 +90,7 @@ testdata/
 
 ## Usage
 
-The CLI exposes three subcommands. JSON goes to stdout. Warnings and human-readable summaries go to stderr, prefixed with `[architex]`.
+The CLI exposes five subcommands. Machine-readable artifacts (JSON, Markdown) go to stdout. Warnings and human-readable summaries go to stderr, prefixed with `[architex]`. Flags can appear before OR after positional arguments.
 
 ```bash
 # Build the graph for a single Terraform directory.
@@ -81,6 +101,15 @@ go run . diff ./testdata/base ./testdata/head
 
 # Evaluate risk for the delta between two graphs.
 go run . score ./testdata/base ./testdata/head
+
+# Render the full PR-ready Markdown payload (banner + summary + focus + diagram + policy).
+go run . report ./testdata/base ./testdata/head
+
+# Same as above, plus persist a timestamped audit bundle to ./.architex/.
+go run . report ./testdata/base ./testdata/head --out ./.architex/
+
+# Print the sanitized egress payload only (the bytes that would leave a runner).
+go run . sanitize ./testdata/base ./testdata/head --salt my-run-salt
 
 # Or build once and reuse:
 go build -o architex . && ./architex score ./base ./head
@@ -127,11 +156,29 @@ risk.Evaluate(delta)
 risk.RiskResult  -->  JSON
 ```
 
-The CLI in `main.go` exposes the full pipeline through three subcommands:
+The CLI in `main.go` exposes the full pipeline through five subcommands:
 
 - `graph <dir>` runs the left side only (parse -> Build).
 - `diff <base> <head>` runs both sides through `delta.Compare`.
 - `score <base> <head>` runs the entire pipeline through `risk.Evaluate`.
+- `report <base> <head> [--out <dir>] [--salt <s>]` runs the entire pipeline through `interpreter.Render` and prints the Markdown PR comment. With `--out`, also persists an audit bundle.
+- `sanitize <base> <head> [--salt <s>]` runs the entire pipeline through `interpreter.Sanitize` and prints the egress payload JSON.
+
+After Stage 3 the pipeline forks into Stage 4:
+
+```
+risk.RiskResult + delta.Delta
+  |
+  v
+interpreter.Render(d, r, interp) -> Report
+  |-- Diagram     (interpreter.RenderMermaid -- always deterministic)
+  |-- Summary     (interp.Summary, default = DeterministicInterpreter)
+  |-- ReviewFocus (interp.ReviewFocus, default = DeterministicInterpreter)
+  |
+  +--> interpreter.FormatMarkdown(rep) -> PR comment string
+  +--> interpreter.Sanitize(rep, policy) -> EgressPayload (the only bytes allowed to leave)
+  +--> interpreter.WriteAudit(rep, opts) -> on-disk bundle with manifest checksums
+```
 
 ## Core Types (models/models.go)
 
@@ -293,6 +340,94 @@ Rule 1 (`public_exposure_introduced`) requires both `Before` and `After` to type
 - Reasons sorted by weight descending; ties broken by rule ID ascending
 - Empty Reasons slice serializes as `[]`, never `null`
 
+## Interpreter Types (interpreter/interpreter.go)
+
+```go
+type Report struct {
+    Delta       delta.Delta     `json:"delta"`
+    Risk        risk.RiskResult `json:"risk"`
+    Diagram     string          `json:"diagram"`      // Mermaid source
+    Summary     string          `json:"summary"`      // plain English
+    ReviewFocus []string        `json:"review_focus"` // bullets
+}
+
+type Interpreter interface {
+    Summary(d delta.Delta, r risk.RiskResult) string
+    ReviewFocus(d delta.Delta, r risk.RiskResult) []string
+}
+
+type DeterministicInterpreter struct{} // default; template-based, no I/O
+```
+
+### Public API
+
+- `interpreter.Render(d delta.Delta, r risk.RiskResult, interp Interpreter) Report`
+- `interpreter.RenderMermaid(d delta.Delta) string`
+- `interpreter.FormatMarkdown(rep Report) string`
+- `interpreter.Sanitize(rep Report, policy SanitizationPolicy) EgressPayload`
+- `interpreter.WriteAudit(rep Report, opts AuditOptions) (AuditBundle, error)`
+- `interpreter.SchemaVersion` constant -- bump when `EgressPayload` shape changes
+- `interpreter.ToolVersion` constant -- bump when audit bundle layout changes
+
+### Mermaid Renderer
+
+- Output is always a `flowchart LR` with four `classDef`s: `added`, `removed`, `changed`, `context`
+- `classDef`s use stroke-only styling so themed environments (GitHub PRs, dark mode) render correctly
+- Status is also encoded in the node label as a leading marker: `+ ` (added), `- ` (removed), `~ ` (changed), no marker (context)
+- Removed edges use the dashed arrow `-.->` to distinguish them from added edges (`-->`)
+- Node IDs are sanitized: any character outside `[a-zA-Z0-9_]` is replaced with `_`
+- Edge endpoints not present in `AddedNodes`/`RemovedNodes`/`ChangedNodes` are emitted as `context` nodes (one-layer dependency surface)
+- Empty delta produces a single placeholder node `empty["no architectural changes"]:::context`
+- Sort order: nodes by original ID; edges by `from`, `to`, `type`, with added before removed for ties
+
+### Markdown Formatter (mirrors master.md §10.1)
+
+Five sections in a fixed order, every PR:
+
+1. **Risk Score banner** -- `## [OK|WARN|FAIL] Risk Score: <SEVERITY> (X.X / 10)` plus status/severity line
+2. **Plain-English Summary** -- single paragraph from `DeterministicInterpreter.Summary`
+3. **Suggested Review Focus** -- ordered bullets from `DeterministicInterpreter.ReviewFocus`, sorted by rule weight descending
+4. **Delta Diagram** -- the Mermaid source wrapped in a fenced ` ```mermaid ` block
+5. **Policy Result** -- one bullet per `RiskReason` (impact label, rule ID, weight, message); `"No policy violations triggered."` when empty
+
+A trailing horizontal rule + `_Generated by ArchiteX (deterministic mode)._` footer makes the comment identifiable for future updates.
+
+## Egress Schema (the §9.4 contract)
+
+`EgressPayload` is the only shape allowed to leave a customer runner. Every field maps 1:1 to `docs/egress-schema.json` (JSON Schema draft-07). The `TestEgressPayload_SchemaParity` test fails if either side adds a field without the other.
+
+| Field                  | Type     | Notes                                                       |
+|------------------------|----------|-------------------------------------------------------------|
+| `schema_version`       | string   | semver of the egress schema (`SchemaVersion` constant)      |
+| `score`                | number   | 0--10, mirrored from `RiskResult.Score`                     |
+| `severity`             | enum     | `low`/`medium`/`high`                                       |
+| `status`               | enum     | `pass`/`warn`/`fail`                                        |
+| `reason_codes`         | string[] | rule IDs only -- free-form `RiskReason.Message` is excluded |
+| `added_nodes`          | object[] | `{id, type}` -- ID is salted SHA-256 prefix `n_xxxxxxxx`    |
+| `removed_nodes`        | object[] | same shape as added                                          |
+| `changed_nodes`        | object[] | `{id, type, changed_attribute_keys}` -- KEYS only, no values |
+| `added_edges`          | object[] | `{from, to, type}` -- endpoints hashed                       |
+| `removed_edges`        | object[] | same shape                                                   |
+| `summary`              | object   | mirror of `delta.DeltaSummary` (counts only)                 |
+
+`SanitizationPolicy` exposes a single knob (`HashSalt`). Empty salt = stable IDs across runs (good for trend diffing). Per-run salt = opaque IDs (good for one-off submissions).
+
+## Audit Bundle Layout
+
+`WriteAudit` produces a directory named `<YYYYMMDD-HHMMSS>-<8 hex>` under the configured `OutDir`. The 8-hex suffix is `sha256(timestamp|baseDir|headDir)[:4]` so concurrent jobs at the same wall-clock second don't collide.
+
+```
+.architex/
+  20260419-143022-a1b2c3d4/
+    diagram.mmd       # Mermaid source
+    summary.md        # the PR comment
+    score.json        # full risk.RiskResult
+    egress.json       # what would leave the runner
+    manifest.json     # timestamps, dirs, tool/schema versions, file checksums
+```
+
+`manifest.json` includes SHA-256 hex digests for the four content files. The manifest does NOT contain its own digest (a manifest cannot self-reference). `TestWriteAudit_ManifestChecksumsMatchFiles` round-trips this contract.
+
 ## Supported Resources
 
 | Terraform Type              | Abstract Type    |
@@ -416,14 +551,15 @@ Running against `testdata/main.tf` produces 9 nodes, 11 edges, confidence 1.0:
 
 ## Test Coverage
 
-30 passing tests across 4 packages. Run `go test ./...` to verify.
+59 passing tests across 5 packages. Run `go test ./...` to verify.
 
-| Package  | Tests | File              |
-|----------|-------|-------------------|
-| parser   | 7     | parser_test.go    |
-| graph    | 5     | graph_test.go     |
-| delta    | 9     | delta_test.go     |
-| risk     | 9     | risk_test.go      |
+| Package      | Tests | Files                                                                                      |
+|--------------|-------|--------------------------------------------------------------------------------------------|
+| parser       | 7     | parser_test.go                                                                             |
+| graph        | 5     | graph_test.go                                                                              |
+| delta        | 9     | delta_test.go                                                                              |
+| risk         | 9     | risk_test.go                                                                               |
+| interpreter  | 29    | mermaid_test.go, summary_test.go, markdown_test.go, sanitize_test.go, audit_test.go, interpreter_test.go (+ fixtures_test.go) |
 
 ## Design Decisions to Preserve
 
@@ -463,6 +599,26 @@ Running against `testdata/main.tf` produces 9 nodes, 11 edges, confidence 1.0:
 
 16. **ChangedNode carries type metadata** -- `delta.ChangedNode` embeds `Type` and `ProviderType` from the head node so risk (and any future consumer) does not need to re-parse the ID string or look up `models.AbstractionMap`. Keep this contract: never derive node type from an ID outside the delta package.
 
+## Design Decisions to Preserve (Phase 4)
+
+17. **Diagram is part of the trust surface, summary is not.** `interpreter.Render` always calls `RenderMermaid` directly -- it does NOT route through the `Interpreter` interface. A future LLM-backed `Interpreter` may rewrite the prose `Summary` and `ReviewFocus` but cannot affect the diagram. This preserves "diagrams are facts, prose is presentation."
+
+18. **Sanitization keys off RuleID and AbstractionMap, not free-form text.** `reasonCodes` only emits known rule IDs from `RiskReason.RuleID`. `SanitizedNode.Type` only contains values from `models.AbstractionMap` (already constrained by Stage 1). No `strings.Contains` against `RiskReason.Message` or any user data. This is the same anti-pattern the Phase-3 hardening pass eliminated from the parser/graph boundary.
+
+19. **Schema parity is a test, not a hope.** `TestEgressPayload_SchemaParity` parses `docs/egress-schema.json` and asserts that the JSON keys produced by `Sanitize` match the schema's `properties` AND `required` arrays exactly. Adding a field to `EgressPayload` without updating the schema (or vice versa) fails the build. This is the procurement guarantee from `master.md` §9.4.
+
+20. **No attribute values in egress.** `SanitizedChangedNode` carries `ChangedAttributeKeys` (sorted strings) but never `ChangedAttribute.Before`/`After`. `TestSanitize_ChangedAttributesContainKeysOnly` asserts no `"before"` / `"after"` keys appear anywhere in the marshaled payload.
+
+21. **Salted, truncated SHA-256 for ID hashing.** `hashID(id, salt) = "n_" + sha256(salt+"|"+id)[:8 hex]`. 32 bits of collision resistance is sufficient for delta-sized payloads (typically <100 nodes). The `n_` prefix keeps IDs syntactically distinct from any unhashed string.
+
+22. **Mermaid styling uses stroke only, never fill.** `classDef` lines use `stroke` + `stroke-width` (and `stroke-dasharray` for removed). No `fill` or `color` properties, so dark-mode renderers (GitHub PRs, dark-themed dashboards) don't get washed out. Status is also conveyed in the label marker (`+ `, `- `, `~ `) so the meaning survives any rendering.
+
+23. **Audit manifest excludes itself.** `Manifest.Files` lists the four content artifacts only -- a manifest cannot contain its own checksum. `TestWriteAudit_ManifestChecksumsMatchFiles` enforces this set explicitly.
+
+24. **CLI flags work in any position.** `splitFlagsAndPositional` separates `-flag` / `-flag=value` / `-flag value` from positionals before calling `flag.FlagSet.Parse`. This avoids the standard-library footgun where `report ./base ./head --out X` silently treats `--out` as a positional. Apply the same helper to any new subcommand that mixes flags and positionals.
+
+25. **Empty slices, never nil, in `Report` and `EgressPayload`.** `Render` initializes `ReviewFocus` to `[]string{}` if the interpreter returns nil. Sanitize uses `make([]T, 0, len(...))`. JSON consumers (and the parity test) rely on `[]` over `null`.
+
 ## Hardening Pass (Pre-Phase-4)
 
 Done before starting Phase 4. No rule semantics or scoring weights changed; this was a structural cleanup.
@@ -485,15 +641,14 @@ Done before starting Phase 4. No rule semantics or scoring weights changed; this
 
 ## What Is NOT Built Yet
 
-- No blast radius analysis
-- No PR/GitHub integration
-- No LLM-powered review summaries
-- No delta diagrams / visualization
+- No GitHub integration (Phase 5: composite Action wrapping `architex report --out`)
+- No LLM-powered summaries (Phase 6: `LLMInterpreter` against the existing `Interpreter` interface)
+- No multi-layer dependency expansion in the diagram (currently: changed/added/removed nodes plus direct edge endpoints only)
 - No module support (warned, skipped)
 - No `for_each` / `count` support (warned, resource skipped)
 - No `dynamic` block support (warned, resource skipped)
 - No variable/local resolution
 - No data source handling
 - No multi-provider support (AWS only)
-- No output to file (stdout only)
 - No `Meta` field on Node (noted as future addition for derived metadata separate from `Attributes`)
+- No environment-tag inference yet (`SanitizationPolicy` has only `HashSalt`; environment knobs will be added when the parser learns to infer them)
