@@ -1,221 +1,443 @@
-# Master Product Specification ArchiteX
+# ArchiteX
 
-Category: DevSecOps / CI/CD Infrastructure Governance
+**The Architecture Firewall for CI/CD.**
+Catch risky infrastructure design before it reaches production.
 
-Positioning: The Architecture Firewall for CI/CD
+---
 
-Tagline: Prevent risky infrastructure design before it reaches production
+## TL;DR
 
-## 1. Executive Summary
+ArchiteX is a free, open-source GitHub Action that reads the Terraform changes in a Pull Request and posts a deterministic architectural review back as a PR comment. Every PR gets:
 
-ArchiteX is an Infrastructure Intelligence and Governance Layer that runs inside the software delivery pipeline and acts as an automated Architectural Review Gate for Infrastructure-as-Code. Its purpose is simple: Detect, explain, and block risky infrastructure topology changes before they are merged. As infrastructure complexity continues to grow, human review is no longer sufficient. Senior engineers are expected to mentally parse thousands of lines of Terraform diffs, infer topological changes, validate security assumptions, and preserve documentation accuracy — all within the time constraints of modern CI/CD. This does not scale. ArchiteX solves this by analyzing Terraform pull requests directly inside GitHub and producing four outputs: A deterministic Risk Score Policy violations with clear explanations A plain-English summary of the architectural change A localized visual delta diagram showing only what changed Unlike documentation tools, ArchiteX is not a passive observer. It is an active pre-deployment architecture control. Unlike cloud-based AI tooling, ArchiteX performs parsing and structural analysis locally on the customer’s CI runner, ensuring that raw infrastructure code never leaves the customer environment. Unlike static IaC scanners, ArchiteX reasons about topology, relationships, blast radius, and architectural intent, not just isolated misconfigurations. ArchiteX is designed to become the missing control layer between: code scanning tools policy engines cloud posture tools In short: SAST scans code. CSPM scans deployed cloud. ArchiteX scans architecture before deployment.
+- a numeric **risk score** with explainable reasons,
+- a **plain-English summary** of what changed,
+- a **focused delta diagram** showing only the changed resources and one layer of dependencies,
+- and an optional **CI gate** that can fail the build on critical violations.
 
-## 2. The Problem
+Everything runs on the user's own GitHub Actions runner. Raw Terraform code never leaves the customer environment. There is no SaaS backend, no telemetry, and no paid tier.
 
-### 2.1 The Review Capacity Crisis
+ArchiteX is positioned between code-level scanners (SAST, IaC linters) and runtime cloud security (CSPM, CNAPP). It is the missing **architectural** control layer between code review and deployment.
 
-Infrastructure review has become cognitively unmanageable. In modern engineering teams, a Pull Request may include: hundreds or thousands of lines of Terraform changes nested modules dynamic blocks indirect networking changes subtle dependency shifts across critical resources Even highly experienced reviewers struggle to reliably answer questions like: Did this change expose a previously private asset? Did this introduce a new dependency on a production database? Did this alter trust boundaries? Did this increase blast radius? Is the resulting architecture still compliant? The result is that critical architectural issues often pass through review simply because they are hard to see in text.
+---
 
-### 2.2 Documentation Drift Creates Invisible Risk
+## Table of Contents
 
-Architecture documentation is usually maintained manually through tools like Lucidchart, Miro, or slide decks. These artifacts become outdated almost immediately after a merge. This creates serious problems: security teams lack accurate topology visibility auditors reconstruct architecture manually onboarding slows down incident responders work from stale diagrams platform teams lose confidence in their own system map Documentation drift is not just a nuisance. In many environments, it becomes a governance failure.
+1. [The Problem](#1-the-problem)
+2. [What ArchiteX Does](#2-what-architex-does)
+3. [Product Principles](#3-product-principles)
+4. [How It Works](#4-how-it-works)
+5. [The PR Experience](#5-the-pr-experience)
+6. [Trust Model and Data Sanitization](#6-trust-model-and-data-sanitization)
+7. [Rollout Strategy](#7-rollout-strategy)
+8. [Scope and Roadmap](#8-scope-and-roadmap)
+9. [Distribution and Sustainability](#9-distribution-and-sustainability)
+10. [How It Compares](#10-how-it-compares)
+11. [Try It](#11-try-it)
 
-### 2.3 Existing Visualization Tools Fail During Review
+---
 
-Most infrastructure visualization tools attempt to map the entire environment at once. That creates: dense unreadable graphs too many edges poor review usability low developer trust Developers reviewing a PR do not need the whole cloud account. They need: What changed, what it touches, and why it matters. This is the core UX insight behind ArchiteX.
+## 1. The Problem
 
-### 2.4 Existing Security Tools Stop Too Low in the Stack
+### 1.1 Infrastructure review has become cognitively unmanageable
 
-Current tools solve adjacent problems: SAST: code-level security flaws SCA: dependency vulnerabilities IaC scanners: static misconfigurations CSPM/CNAPP: runtime cloud posture Policy engines: rule enforcement at plan/apply time But none of them fully answer this question: Is this infrastructure change architecturally safe? ArchiteX occupies this missing layer.
+Modern Terraform PRs routinely contain hundreds or thousands of changed lines, nested modules, dynamic blocks, and indirect dependency shifts across critical resources. Even experienced reviewers struggle to reliably answer questions like:
 
-### 2.5 Security and Compliance Buyers Reject Code Exfiltration
+- Did this change expose a previously private asset?
+- Did this introduce a new dependency on a production database?
+- Did this alter trust boundaries?
+- Did this increase blast radius?
 
-Many organizations, especially in regulated sectors, cannot adopt tools that require: syncing private repos to a third-party SaaS uploading infrastructure code externally granting full cloud account access without strict controls This is a major blocker for many modern AI-assisted developer tools. ArchiteX is designed specifically to remove that blocker.
+Critical architectural issues regularly slip through review simply because they are hard to *see* in a text diff.
 
-## 3. Product Thesis
+### 1.2 Documentation drifts the moment it ships
 
-ArchiteX is built on one core thesis: Infrastructure architecture should be treated as a governable control surface, not just as code to be linted or diagrams to be drawn. This means ArchiteX is not fundamentally a documentation product. It is a security and governance product with strong developer experience. That distinction matters because it determines: who buys it how it is priced how it is trusted whether it becomes mandatory or optional If ArchiteX only generates diagrams and summaries, it remains a DevEx tool. If ArchiteX can deterministically identify risky topology changes, explain them, and enforce policies in CI, it becomes a real enterprise control. That is the category ArchiteX is built for.
+Architecture diagrams maintained in Lucidchart, Miro, or slide decks become stale almost immediately after a merge. The result: security teams lack accurate topology visibility, auditors reconstruct architecture manually, onboarding slows, and incident responders work from out-of-date pictures.
 
-## 4. Product Principles
+### 1.3 Existing visualization tools fail during review
 
-ArchiteX is designed around six non-negotiable principles.
+Most infrastructure visualization tools try to map the entire environment at once. Reviewers don't need the whole cloud account — they need a focused answer to **what changed, what it touches, and why it matters**. That is the core UX insight behind ArchiteX.
 
-### 4.1 Deterministic First
+### 1.4 Adjacent security tools stop too low in the stack
 
-All structural understanding, policy evaluation, and risk scoring must be deterministic and auditable. The LLM is never allowed to: decide risk classify compliance infer topology modify facts The LLM is limited to presentation only.
+| Tool category | What it answers | What it misses |
+|---|---|---|
+| SAST | Code-level security flaws | Architecture |
+| SCA | Dependency vulnerabilities | Architecture |
+| IaC linters | Static misconfigurations on individual resources | Topology and relationships |
+| CSPM / CNAPP | Runtime cloud posture | Pre-deployment review |
+| Policy engines | Explicit rules at plan/apply time | Semantic delta context |
 
-### 4.2 Zero Raw Code Exfiltration
+None of them answer: **is this infrastructure change architecturally safe?** That is the gap ArchiteX is built for.
 
-Raw IaC code must never leave the customer environment. All parsing and graph construction happens locally on the customer runner. Only tightly sanitized metadata may leave the runner, and only when external presentation services are used.
+### 1.5 Many teams cannot adopt tools that exfiltrate code
 
-### 4.3 Blast Radius Over Full Mapping
+Regulated organizations and security-conscious teams often cannot grant a third-party SaaS access to their private infrastructure repos. ArchiteX is designed specifically to remove that blocker by running entirely on the customer's own runner.
 
-The default review mode is localized architectural context: changed resources one layer of dependencies directly affected trust boundaries This avoids the “spaghetti map” problem.
+---
 
-### 4.4 Day-1 Value Without Custom Setup
+## 2. What ArchiteX Does
 
-Customers should get useful results immediately. ArchiteX must ship with: built-in rules default scoring logic useful summaries readable visuals Custom policy authoring is an enterprise feature, not an MVP requirement.
+ArchiteX is a deterministic architecture intelligence and governance layer for Infrastructure-as-Code, embedded in CI, that detects, explains, and optionally blocks risky infrastructure topology changes before deployment.
 
-### 4.5 Developer Utility Before Enforcement
+It is **not**:
 
-Developers must find the tool useful before they accept it as a gate. ArchiteX should first win trust through: clarity speed useful review assistance low-noise findings Then it can become enforcement infrastructure.
+- just a diagram generator,
+- just an LLM wrapper,
+- just another IaC linter,
+- just a policy engine.
 
-### 4.6 Explainability Is Mandatory
+It is the missing architectural control between code review and deployment.
 
-Every meaningful output must be explainable: why the score is high why a policy failed what changed structurally what data left the runner No black boxes.
+### 2.1 Two audiences, one surface
 
-## 5. Product Scope
+| Persona | What they get from ArchiteX |
+|---|---|
+| **Developers and platform engineers** | Faster PR review, fewer hidden topology surprises, plain-English summaries, focused delta diagrams, low-noise findings. |
+| **Security, compliance, and engineering leadership** | Deterministic architectural guardrails, explainable risk scoring, audit trail artifacts, optional CI blocking, organization-wide consistency. |
 
-Initial Target Scope Platform: GitHub Format: Native GitHub App + GitHub Action Execution: Local CI Runner / GitHub Actions Runner IaC Scope: Terraform Cloud Scope: AWS Review Surface: Pull Requests Explicit Non-Goals for MVP The MVP will not attempt to: support all IaC languages map entire cloud estates replace Terraform plan replace runtime cloud security tools create a general architecture knowledge graph solve all compliance frameworks out of the box provide interactive full-scale architecture exploration The MVP is tightly scoped to one job: Catch risky Terraform AWS architecture changes in GitHub Pull Requests and make them instantly understandable.
+Both groups consume the same PR comment. They just value different parts of it.
 
-## 6. Core User Personas
+---
 
-ArchiteX serves two different personas with one product surface, but they are buying different value.
+## 3. Product Principles
 
-### 6.1 Developer / Platform Engineer Persona
+ArchiteX is built on six non-negotiable principles. They are the reason the project exists in the form it does.
 
-What they want: faster PR review easier Terraform understanding less cognitive load fewer hidden topology surprises better visibility into blast radius confidence before merge What they love: “Explain my change” visual deltas clear plain-English summaries useful review focus suggestions low noise This is the adoption persona.
+### 3.1 Deterministic first
 
-### 6.2 Security / Compliance / Engineering Leadership Persona
+All structural understanding, policy evaluation, and risk scoring is deterministic and auditable. The LLM is **never** allowed to:
 
-What they want: deterministic governance enforceable architectural guardrails documented change history compliance evidence lower review risk fewer dangerous merges What they buy: policy engine CI blocking audit trail custom rules organization-wide governance This is the budget persona.
+- decide risk,
+- classify compliance,
+- infer topology,
+- modify facts.
 
-## 7. Category Positioning
+The LLM is restricted to **presentation only** — natural-language summaries, layout refinement, and reviewer-focus suggestions derived from already-deterministic structured input. If the LLM is unavailable, ArchiteX still produces a valid score, valid policy results, a machine-rendered diagram, and a factual review output.
 
-ArchiteX is best understood as: The Architecture Firewall for CI/CD It sits between: code-level security tools and runtime cloud security platforms ArchiteX vs Diagram Tools Diagram tools help people communicate after the fact. ArchiteX prevents unsafe infrastructure changes before they happen. ArchiteX vs IaC Scanners IaC scanners identify resource-level misconfigurations. ArchiteX evaluates architectural relationships, dependency changes, and topology risk. ArchiteX vs Policy Engines Policy engines enforce explicit rules. ArchiteX adds: topology-aware semantic diffing default architecture intelligence visual review context historical change understanding ArchiteX vs CSPM/CNAPP CSPM tools inspect deployed environments. ArchiteX governs proposed infrastructure before deployment.
+### 3.2 Zero raw code exfiltration
 
-## 8. Product Architecture
+Raw IaC code never leaves the customer environment. Parsing and graph construction happen on the customer's own CI runner. Only tightly sanitized metadata may leave the runner, and only when the user explicitly opts into an external presentation service. See [§6 Trust Model](#6-trust-model-and-data-sanitization).
 
-ArchiteX uses a strict four-stage pipeline.
+### 3.3 Blast radius over full mapping
 
-### Stage 1: Fact-Finder Deterministic Structural Parsing
+The default review surface is the **localized** architectural context: the changed resources, one layer of dependencies, and the directly affected trust boundaries. This avoids the "spaghetti map" problem that plagues whole-environment visualizers.
 
-The Fact-Finder runs entirely on the customer’s CI runner. Its job is to build a machine-readable infrastructure graph from the Terraform change set. Responsibilities parse Terraform configuration resolve local module relationships extract resources, references, and dependencies identify key security-relevant attributes normalize structure into canonical graph format Output A deterministic structured graph representation, for example: nodes edges resource metadata trust boundary tags exposure flags encryption attributes environment classification when inferable from deterministic rules Design Principle The Fact-Finder must rely on deterministic parsing and controlled evaluation only. It must not rely on LLMs. MVP Constraint The MVP will support a bounded subset of real-world Terraform patterns first, then expand. Priority will go to the patterns most common in production AWS repositories. 
+### 3.4 Day-1 value without custom setup
 
-### Stage 2: Delta Engine Semantic Architectural Diffing
+ArchiteX ships with built-in opinionated rules, default scoring, useful summaries, and readable visuals. A team should get value within minutes of installing the action — no custom configuration required. Custom policy authoring is a future configurability concern, not a prerequisite.
 
-The Delta Engine compares: the base graph the head graph Its purpose is not line diffing. Its purpose is structural meaning. Responsibilities detect added resources detect removed resources detect modified dependencies detect trust-boundary changes detect exposure changes isolate local blast radius produce a bounded delta subgraph for reviewer context Core Output A semantic architectural delta, not just a code diff. This is the foundation for: diagrams scoring summaries review focus suggestions 
+### 3.5 Developer utility before enforcement
 
-### Stage 3: Risk & Policy Engine Deterministic Governance Layer
+Developers must find the tool useful before they accept it as a gate. ArchiteX wins trust first through clarity, speed, and low-noise findings. Only then does it become enforcement infrastructure. See [§7 Rollout Strategy](#7-rollout-strategy).
 
-This is the core product moat. The Risk & Policy Engine must be fully: deterministic auditable version-controlled explainable tunable Hard Rule Risk scores are never generated by an LLM. Responsibilities evaluate delta graph against built-in rules apply policy severity levels calculate weighted risk score generate explainable reason codes determine PR pass/warn/fail status Risk Score Model Each PR receives a numeric score and severity band. Example: Risk Score: HIGH (8.3 / 10) Breakdown Exposure: 4.0 New public ingress path introduced Criticality: 2.5 Newly connected resource tagged as production data tier Change Scope: 1.8 Cross-boundary dependency chain expanded across critical services The scoring function must be documented and deterministic. Tunability Enterprise customers may: adjust severity thresholds disable specific default rules add custom rules define environment-specific sensitivity Day-1 Value ArchiteX ships with built-in opinionated architecture rules inspired by: AWS security best practices common IaC failure patterns network segmentation principles common audit concerns Example Built-In Rules No direct public path to private data tier No unrestricted ingress on sensitive ports Encryption required on persistent data resources No production database introduced without explicit access controls No new internet-facing resource in protected environment without approval tag No broadening of trust boundary between app and data layers without review 
+### 3.6 Explainability is mandatory
 
-### Stage 4: Interpreter Layer Constrained Presentation Layer
+Every meaningful output is explainable: why the score is high, why a specific policy failed, what changed structurally, and exactly what data left the runner. No black boxes.
 
-This is the only stage where an LLM may be used. Allowed Responsibilities convert sanitized delta metadata into Mermaid layout generate plain-English summary suggest reviewer focus areas improve readability of factual output Forbidden Responsibilities infer topology assign severity decide policy outcome invent relationships override deterministic output Safe Output Principle All LLM-generated content must be derived from deterministic structured inputs. If the LLM is unavailable, ArchiteX must still produce: score policy results machine-generated diagram fallback factual review output The LLM improves presentation. It is not part of the trust model.
+---
 
-## 9. Data Sanitization Model
+## 4. How It Works
 
-Because “zero exfiltration” is a core buying reason, ArchiteX must define exactly what leaves the runner.
+ArchiteX uses a strict four-stage pipeline. Each stage has a narrow, well-defined responsibility.
 
-### 9.1 What Stays Local
+### Stage 1 — Fact-Finder (deterministic structural parsing)
 
-The following never leave the customer CI environment: raw Terraform source files variable files secrets plan files state files provider credentials full resource names if configured as sensitive comments and surrounding code context
+Runs entirely on the customer's CI runner. Builds a machine-readable infrastructure graph from the Terraform change set.
 
-### 9.2 What May Leave the Runner
+- Parses Terraform configuration.
+- Resolves local module relationships.
+- Extracts resources, references, and dependencies.
+- Identifies key security-relevant attributes (encryption, exposure, trust boundaries).
+- Normalizes everything into a canonical graph format with nodes, edges, and metadata.
 
-Only a sanitized delta payload may be transmitted, and only if the customer enables external presentation services. This payload may include: abstract node identifiers abstract resource types abstract edge relationships added / removed / modified markers severity reason codes generalized environment labels bounded metadata necessary for summary generation
+**Constraint:** the Fact-Finder relies on deterministic parsing only. No LLMs.
 
-### 9.3 Sanitization Rules
+### Stage 2 — Delta Engine (semantic architectural diffing)
 
-Sanitization must support: name redaction hashing or tokenization of identifiers environment aliasing configurable metadata suppression allowlist-based egress fields
+Compares the base graph and the head graph. Its job is **structural meaning**, not line diffing.
 
-### 9.4 Enterprise Requirement
+- Detects added, removed, and modified resources.
+- Detects modified dependencies and trust-boundary changes.
+- Detects exposure changes.
+- Isolates a bounded delta subgraph for reviewer context.
 
-ArchiteX must publish a machine-readable sanitization schema and egress specification showing exactly what bytes may leave the runner. This is essential for enterprise trust and procurement.
+The output is a **semantic architectural delta** that drives every downstream stage.
 
-## 10. User Experience
+### Stage 3 — Risk and Policy Engine (deterministic governance layer)
 
+The product's core moat. Fully deterministic, auditable, version-controlled, explainable, and tunable.
 
+- Evaluates the delta against built-in rules.
+- Assigns weighted severity.
+- Calculates a numeric score (0–10) with a severity band (low / medium / high) and a CI status (pass / warn / fail).
+- Generates explainable reason codes for every triggered rule.
 
-### 10.1 Pull Request Payload
+**Hard rule:** risk scores are never generated by an LLM.
 
-When a developer opens a PR containing Terraform changes, ArchiteX posts a structured PR comment. Section 1: Risk Score A visible severity banner, for example: Risk Score: HIGH (8.3 / 10) With clear reasons: Public ingress introduced New production-tier dependency added Blast radius expanded across trust boundary Section 2: Plain-English Summary Example: A new database resource was introduced and connected to an existing application tier inside the production VPC. The change increases data persistence dependencies and adds a new potential exposure path that should be reviewed carefully. Section 3: Suggested Review Focus Example: Verify security group rules on the new database path Confirm encryption and backup settings Review whether the new network path should be reachable from the public application tier Confirm this dependency is intended for production Section 4: Delta Diagram A focused diagram of only the changed resources plus one dependency layer. Visual conventions: green = added red = removed neutral = unchanged supporting context trust boundaries clearly indicated Section 5: Policy Result Example: 2 policy warnings 1 critical policy violation If blocking is enabled, the PR status check fails.
+Example output:
 
-### 10.2 Audit Trail
+```text
+Risk Score: HIGH (8.3 / 10)
+  Exposure       : 4.0  New public ingress path introduced
+  Criticality    : 2.5  Newly connected resource tagged as production data tier
+  Change Scope   : 1.8  Cross-boundary dependency chain expanded across critical services
+```
 
-ArchiteX may optionally commit generated artifacts to a versioned /docs path or store them in an audit log system. These artifacts include: diagram snapshot score breakdown triggered rules reviewer-facing summary timestamped architectural diff record This turns architecture documentation into an automatic byproduct of engineering work.
+Built-in rules cover patterns like:
 
-### 10.3 Developer Utility Features
+- No direct public path to a private data tier.
+- No unrestricted ingress on sensitive ports.
+- Encryption required on persistent data resources.
+- No new internet-facing resource in protected environments without an approval tag.
+- No broadening of trust boundary between application and data layers without explicit review.
 
-To become loved, not merely tolerated, ArchiteX must provide immediate value to engineers. Examples: Explain My Change What Did I Break? Why Is This High Risk? Show Only What Changed What Should I Review First? The experience should feel like an architectural co-reviewer, not a noisy compliance bot.
+Future configurability options will let users adjust severity thresholds, disable specific defaults, add custom rules, and define environment-specific sensitivity.
 
-## 11. Rollout Strategy
+### Stage 4 — Interpreter (constrained presentation layer)
 
-Blocking too early creates rejection. ArchiteX should roll out in stages. Phase 1: Visibility PR comments only no blocking trust building noise tuning Phase 2: Advisory Governance warnings soft policy thresholds team dashboards evidence collection Phase 3: Enforced Governance CI blocking for critical violations opt-in or policy-based activation custom rules and exception workflow This rollout preserves developer trust while enabling eventual control posture.
+This is the **only** stage where an LLM may be used.
 
-## 12. Pricing and Packaging
+**Allowed:**
 
-Because ArchiteX serves two personas, packaging must reflect both adoption and enforcement. Team Tier For developer-led adoption Indicative price: $99–149/month per team Includes: PR delta diagrams plain-English summaries basic deterministic risk scoring built-in rules limited history Purpose: fast adoption bottom-up usage prove immediate value Growth Tier For scaling platform teams Indicative price: $299–499/month Includes: full risk breakdown trend and history view soft policy enforcement basic reporting multi-repo coverage Purpose: move from utility to governance Enterprise Tier For security, compliance, and engineering leadership Indicative price: $1,000+/month, usage and org dependent Includes: CI blocking custom policy rules compliance audit logs SSO / RBAC sanitization controls organization-wide governance executive and audit-ready reporting Purpose: move into mandatory security budget
+- Convert sanitized delta metadata into a Mermaid diagram layout.
+- Generate a plain-English summary of the change.
+- Suggest reviewer focus areas.
+- Improve readability of factual output.
 
-## 13. Go-To-Market Strategy
+**Forbidden:**
 
-ArchiteX requires a dual-motion GTM strategy.
+- Inferring topology.
+- Assigning severity.
+- Deciding policy outcomes.
+- Inventing relationships.
+- Overriding any deterministic output.
 
-### 13.1 Bottom-Up Motion
+The LLM improves presentation. It is not part of the trust model.
 
-The PR Payload is the viral mechanism. Flow: one engineer installs ArchiteX PR comment appears reviewers see value immediately adoption spreads repo to repo This mirrors successful developer tools that spread via workflow visibility.
+---
 
-### 13.2 Top-Down Motion
+## 5. The PR Experience
 
-Enterprise monetization comes from: security compliance platform leadership To cross the gap, ArchiteX needs a champion toolkit. Champion Toolkit Every internal champion should be able to show: number of risky changes caught estimated review time saved examples of production-impacting findings audit trail artifacts generated mapping to compliance controls or governance requirements This is how developer love becomes executive approval.
+When a developer opens a Pull Request that touches Terraform, ArchiteX posts a single sticky comment back to the PR. The comment contains five sections.
 
-### 13.3 Core GTM Message
+### 5.1 Risk score
 
-For developers: “Understand Terraform changes instantly.” For platform teams: “Reduce review load and hidden blast radius.” For CISOs and compliance leaders: “Enforce architectural controls before deployment and generate auditable evidence automatically.”
+A visible severity banner with explicit reasons:
 
-## 14. Competitive Position
+> **Risk Score: HIGH (8.3 / 10)**
+>
+> - Public ingress introduced
+> - New production-tier dependency added
+> - Blast radius expanded across trust boundary
 
-Against HashiCorp Sentinel / OPA They provide policy enforcement, but not strong reviewer-first architecture visualization and semantic delta context in PRs. ArchiteX wins on: earlier feedback better review ergonomics built-in default value architecture-first context Against Snyk IaC Snyk finds resource-level issues well, but ArchiteX focuses on topology and architectural relationships. ArchiteX wins on: architectural delta awareness blast radius visibility dependency reasoning trust boundary changes Against Runtime CSPM / CNAPP Those tools inspect deployed environments. ArchiteX wins by preventing risky architecture from ever being merged. Against Diagram Tools They document. ArchiteX governs.
+### 5.2 Plain-English summary
 
-## 15. Moat
+A short, factual narrative derived from the deterministic delta. Example:
 
-The parser alone is not the moat. The moat is the combination of:
+> A new database resource was introduced and connected to an existing application tier inside the production VPC. The change increases data persistence dependencies and adds a new potential exposure path that should be reviewed carefully.
 
-### 15.1 Local-Runner Architecture
+### 5.3 Suggested review focus
 
-A short-term enterprise wedge and procurement accelerator.
+A short checklist of the most important things for a human reviewer to actually verify. Example:
 
-### 15.2 Semantic Delta Engine
+- Verify security group rules on the new database path.
+- Confirm encryption and backup settings.
+- Review whether the new network path should be reachable from the public application tier.
+- Confirm this dependency is intended for production.
 
-Understanding architectural change, not just code change.
+### 5.4 Delta diagram
 
-### 15.3 Deterministic Risk Model
+A focused Mermaid diagram of only the changed resources plus one layer of dependencies. Visual conventions:
 
-An auditable, explainable architecture scoring framework.
+- **Green** = added
+- **Red** = removed
+- **Neutral** = unchanged supporting context
+- Trust boundaries are explicitly drawn
 
-### 15.4 Opinionated Default Rule Library
+### 5.5 Policy result
 
-Immediate customer value without lengthy custom configuration.
+Triggered policies, with severity. If the action is configured in `mode: blocking`, a critical violation also fails the GitHub status check.
 
-### 15.5 Historical and Temporal Intelligence
+### 5.6 Audit trail (optional)
 
-Over time, ArchiteX will learn architectural patterns within a repository and highlight anomalies such as: first-time exposure events unusual dependency patterns sudden trust-boundary expansion drift from established repository norms This historical layer is the strongest long-term moat because it improves with repository-specific history.
+Every run also produces a versioned bundle that can be uploaded as a workflow artifact (or committed to a `/docs` path):
 
-## 16. Future Roadmap
+- Diagram snapshot
+- Score breakdown
+- Triggered rules
+- Reviewer-facing summary
+- Timestamped architectural diff record
 
-After the MVP proves value in Terraform + AWS + GitHub, expansion can proceed carefully. Ecosystem Expansion GitLab Bitbucket API ingestion IaC Expansion Helm / Kubernetes Pulumi AWS CDK Visualization Expansion proprietary layout engine interactive graph exploration layered views zoomable DAG interface Intelligence Expansion temporal anomaly detection drift trend reporting architecture review analytics approval workflows and exceptions organization-wide architectural posture scoring
+This turns architecture documentation into an automatic byproduct of normal engineering work.
 
-## 17. MVP Definition
+---
 
-The MVP must prove one thing: Can ArchiteX accurately and usefully detect risky Terraform AWS architectural changes in PRs, with low enough noise that developers keep it enabled? MVP Success Criteria parses real Terraform repositories with acceptable accuracy produces useful delta diagrams generates trustworthy deterministic scores catches issues developers care about creates low enough noise to preserve trust gives platform/security teams enough evidence to explore rollout MVP Deliverables Terraform structural parser for bounded AWS scope Base vs head graph diff engine Built-in deterministic ruleset Explainable risk scoring model GitHub PR comment integration Diagram generation Sanitized egress schema Basic audit artifact generation
+## 6. Trust Model and Data Sanitization
 
-## 18. Single Biggest Execution Risk
+Because zero exfiltration is a core design goal, ArchiteX defines exactly what may and may not leave the runner.
 
-The biggest early risk is not GTM. It is accuracy. If ArchiteX cannot correctly parse and interpret real-world Terraform, everything downstream breaks: wrong diagrams wrong scores false positives developer distrust enterprise rejection The most difficult cases include: modules dynamic blocks for_each count conditional expressions external data-driven config patterns indirect dependencies Because of this, MVP scope discipline is critical. The product should not pretend to solve all Terraform immediately. It should instead: support a carefully chosen production-relevant subset first be explicit about unsupported patterns degrade safely make uncertainty visible when confidence is limited Trust is more important than breadth.
+### 6.1 What stays local — always
 
-## 19. Strategic Decision: Deterministic vs Probabilistic
+- Raw Terraform source files
+- Variable files
+- Secrets
+- Plan files and state files
+- Provider credentials
+- Resource names that the user marks sensitive
+- Comments and surrounding code context
 
-This must be an explicit architectural decision. Decision ArchiteX will use deterministic logic for all trust-sensitive outputs. That includes: graph construction semantic diffing policy evaluation risk scoring CI pass/fail decisions LLM Usage LLMs may be used only for: natural-language summaries review suggestions diagram layout refinement This is not optional. It is essential to: enterprise trust security credibility auditability procurement success If ArchiteX blurs this line, it stops being a true control and becomes just another AI dev tool.
+### 6.2 What may leave the runner — only on opt-in
 
-## 20. Why Companies Will Buy It
+When the user explicitly enables an external presentation service, only a sanitized delta payload is transmitted. That payload may include:
 
-Companies will buy ArchiteX because it helps them do something they currently do poorly, manually, and inconsistently: review risky infra changes keep architecture documentation current reduce audit pain impose architecture guardrails without slowing every team down create a trustworthy pre-deployment control layer ArchiteX converts architecture review from: tribal knowledge stale diagrams stressed senior reviewers vague security assumptions into: deterministic controls visible blast radius versioned evidence faster safe review
+- Abstract node identifiers
+- Abstract resource types
+- Abstract edge relationships
+- Added / removed / modified markers
+- Severity reason codes
+- Generalized environment labels
+- Bounded metadata necessary for summary generation
 
-## 21. Why Developers Will Love It
+In the default GitHub Action configuration, **nothing** leaves the runner — the comment is posted from within the runner itself using the user's `GITHUB_TOKEN`.
 
-Developers will love ArchiteX if it does three things well: shows only the relevant change explains it clearly stays accurate and low-noise If it helps them answer: what changed why it matters what to review whether they broke something then it becomes a real workflow improvement, not just another gate. That is how ArchiteX becomes both: a product companies buy and a tool developers actually keep turned on
+### 6.3 Sanitization controls
 
-## 22. Final Product Definition
+ArchiteX supports name redaction, hashing or tokenization of identifiers, environment aliasing, configurable metadata suppression, and allowlist-based egress fields.
 
-ArchiteX is: A deterministic architecture intelligence and governance layer for Infrastructure-as-Code, embedded in CI/CD, that detects, explains, and optionally blocks risky infrastructure topology changes before deployment. It is not: just a diagram generator just an LLM wrapper just another IaC linter just a policy engine It is the missing architecture control layer between code review and deployment.
+### 6.4 Auditable egress specification
+
+ArchiteX publishes a machine-readable sanitization schema and egress specification, so any organization can verify exactly what bytes leave the runner before approving rollout.
+
+---
+
+## 7. Rollout Strategy
+
+Blocking PRs too early creates rejection. ArchiteX is designed to roll out in three stages.
+
+### Phase 1 — Visibility
+
+PR comments only. No blocking. The goal is trust building and noise tuning. Engineers see ArchiteX show up in their PRs and learn what it catches.
+
+### Phase 2 — Advisory governance
+
+Warnings, soft policy thresholds, evidence collection. Platform and security teams start using the audit bundles as input to broader governance work.
+
+### Phase 3 — Enforced governance
+
+CI blocking for critical violations. Policy-based or opt-in activation. Custom rules and exception workflow.
+
+This sequence preserves developer trust while enabling an eventual control posture.
+
+---
+
+## 8. Scope and Roadmap
+
+### 8.1 Initial supported scope
+
+| Dimension | Scope |
+|---|---|
+| Source platform | GitHub |
+| Distribution | GitHub Action + (planned) GitHub App |
+| Execution | Customer's CI runner — local-first |
+| IaC language | Terraform |
+| Cloud target | AWS |
+| Review surface | Pull Requests |
+
+### 8.2 Explicitly out of scope (for now)
+
+ArchiteX deliberately does not try to:
+
+- support all IaC languages on day one,
+- map entire cloud estates,
+- replace `terraform plan`,
+- replace runtime cloud security tools,
+- create a general architecture knowledge graph,
+- solve every compliance framework out of the box,
+- provide interactive full-scale architecture exploration.
+
+The current scope is tightly focused: catch risky Terraform AWS architectural changes in GitHub Pull Requests and make them instantly understandable.
+
+### 8.3 Future roadmap
+
+Once the core experience is solid, expansion proceeds carefully along four axes:
+
+- **Ecosystem:** GitLab, Bitbucket, generic API ingestion.
+- **IaC:** Helm / Kubernetes, Pulumi, AWS CDK.
+- **Visualization:** richer layout, interactive graph exploration, layered views, zoomable DAG.
+- **Intelligence:** temporal anomaly detection, drift trend reporting, organization-wide architectural posture scoring, approval workflows and exceptions.
+
+The historical/temporal layer is intentionally a long-term direction: over time, ArchiteX learns the architectural patterns of a specific repository and surfaces anomalies (first-time exposure events, unusual dependency patterns, sudden trust-boundary expansion, drift from established norms). That repository-specific history is the strongest long-term value.
+
+---
+
+## 9. Distribution and Sustainability
+
+ArchiteX is a **free, open-source project**. There is no paid tier, no commercial product, no SaaS layer, and no license keys. The full source lives in a public GitHub repository, and the GitHub Action is consumed by reference (`uses: <owner>/ArchiteX@<version>`) at zero cost to the user.
+
+### 9.1 Why free
+
+- **Trust is the product.** Every paywall, license server, or sales call directly reduces the surface on which ArchiteX can prove its value. A free tool that earns trust by quietly working aligns better with the project's mission than a paid tool that earns revenue by extracting value from a small audience.
+- **The architecture is naturally cost-free to operate.** Parsing, graph construction, scoring, and rendering all happen on the user's own GitHub Actions runner. The maintainer has no servers, no per-user costs, and therefore no business pressure to charge anyone.
+- **The space is already crowded with paid commercial offerings.** The most useful niche ArchiteX can occupy is the deterministic, source-auditable, on-runner alternative that any team can adopt without a procurement conversation.
+
+### 9.2 Possible future sustainability paths (none planned, all optional)
+
+- **GitHub Sponsors / OpenCollective donations.** If the project sees broad adoption, a sponsor button may be added to the repository. Donations would fund continued maintenance — never feature gating. No donor receives privileged features.
+- **Paid support engagements.** A user with a complex setup may contract the maintainer directly for installation help, custom rule authoring, or training. That is a contract relationship, not a product. The tool itself remains free.
+- **Acquisition or hand-off.** If a larger organization wants to commercialize ArchiteX, the codebase or maintainership may be transferred. That is a binary decision made once, not an ongoing business model.
+
+### 9.3 What ArchiteX explicitly does not do
+
+- No paid tiers, freemium gating, "pro" features, or usage limits in the open-source distribution.
+- No telemetry collected by default. The egress schema (§6.2) exists so any future opt-in telemetry would be implemented in the same auditable, sanitized way as the rest of the trust model — but no such endpoint exists today and none is planned.
+- No advertising, lead capture, or marketing in the tool's output. PR comments contain only the analysis and a non-interactive footer marker.
+
+---
+
+## 10. How It Compares
+
+### vs. HashiCorp Sentinel / OPA
+
+Policy engines enforce explicit rules. ArchiteX adds reviewer-first architectural visualization, semantic delta context inside the PR, and built-in opinionated defaults that work without custom rule authoring.
+
+### vs. Snyk IaC, Bridgecrew, Wiz Code, and similar IaC scanners
+
+Scanners find resource-level misconfigurations well. ArchiteX focuses on **topology and architectural relationships** — blast radius, dependency reasoning, trust-boundary changes — which resource-level scanners are not designed to catch.
+
+### vs. Runtime CSPM / CNAPP (Wiz, Lacework, Prisma Cloud, etc.)
+
+Those tools inspect deployed environments. ArchiteX prevents risky architecture from being merged in the first place.
+
+### vs. Diagram tools (Lucidchart, Miro, Cloudcraft)
+
+Diagram tools document. ArchiteX governs.
+
+### Project moat (over time)
+
+The parser is not the moat. The moat is the combination of:
+
+- **Local-runner architecture** — a trust accelerator: any team can adopt ArchiteX without sending source code to a third party, removing the single largest objection most security-conscious organizations have to AI-adjacent developer tools.
+- **Semantic delta engine** — understanding architectural change, not just code change.
+- **Deterministic risk model** — auditable, explainable, version-controlled.
+- **Opinionated default rule library** — immediate value without lengthy configuration.
+- **Repository-specific historical intelligence** — the long-term value that improves with time-in-repo.
+
+---
+
+## 11. Try It
+
+The simplest way to see ArchiteX in action is to add the GitHub Action to a Terraform repository and open a PR. Full installation, configuration, and trust-model documentation lives in [`docs/github-action.md`](docs/github-action.md).
+
+### 11.1 Contributing and feedback
+
+ArchiteX is maintained in the open. The single best way to influence the roadmap is to:
+
+1. **Open a GitHub Issue** describing your use case, the Terraform pattern that didn't parse correctly, the rule you wished existed, or the false positive that hurt your team's trust in the tool.
+2. **Open a Discussion** for broader design questions and proposals.
+3. **Open a Pull Request** with tests if you have a fix or a small additive feature.
+
+The maintainer's primary job, post-launch, is to read every Issue and Discussion that comes in. Real user feedback is the only legitimate source of roadmap direction.
+
+### 11.2 License
+
+ArchiteX is released under the [MIT License](LICENSE). You may use, modify, and distribute it freely, including in commercial settings, with no warranty.
