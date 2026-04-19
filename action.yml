@@ -74,6 +74,7 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version-file: ${{ inputs.go-version-file != '' && inputs.go-version-file || format('{0}/go.mod', github.action_path) }}
+        cache-dependency-path: ${{ format('{0}/go.sum', github.action_path) }}
 
     - name: Build architex
       id: build
@@ -139,10 +140,11 @@ runs:
         exit 1
 
     - name: Upload audit bundle
-      if: ${{ inputs.upload-artifact == 'true' && always() }}
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: architex-audit-${{ github.run_id }}
         path: ${{ github.workspace }}/.architex/
+        include-hidden-files: true
         if-no-files-found: warn
         retention-days: 30
