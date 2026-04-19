@@ -111,6 +111,49 @@ func removalDelta() delta.Delta {
 	}
 }
 
+// top10HighRiskDelta replicates the testdata/top10_base -> testdata/top10_head
+// scenario: the S3 bucket loses its public_access_block, the role gains
+// AdministratorAccess, and a public Lambda function URL is introduced.
+//
+// Expected to fire all three Phase 6 rules plus the existing new_entry_point
+// + resource_removed rules.
+func top10HighRiskDelta() delta.Delta {
+	return delta.Delta{
+		AddedNodes: []models.Node{
+			{
+				ID:           "aws_iam_role_policy_attachment.app_admin",
+				Type:         "identity",
+				ProviderType: "aws_iam_role_policy_attachment",
+				Attributes: map[string]any{
+					"public":     false,
+					"policy_arn": "arn:aws:iam::aws:policy/AdministratorAccess",
+				},
+			},
+			{
+				ID:           "aws_lambda_function_url.worker",
+				Type:         "entry_point",
+				ProviderType: "aws_lambda_function_url",
+				Attributes:   map[string]any{"public": true},
+			},
+		},
+		RemovedNodes: []models.Node{
+			{
+				ID:           "aws_s3_bucket_public_access_block.logs",
+				Type:         "access_control",
+				ProviderType: "aws_s3_bucket_public_access_block",
+				Attributes:   map[string]any{"public": false},
+			},
+		},
+		AddedEdges:   []models.Edge{},
+		RemovedEdges: []models.Edge{},
+		ChangedNodes: []delta.ChangedNode{},
+		Summary: delta.DeltaSummary{
+			AddedNodes:   2,
+			RemovedNodes: 1,
+		},
+	}
+}
+
 // runRisk evaluates risk for the given delta and returns the result. Wrapping
 // the call keeps test bodies focused on assertions, not setup.
 func runRisk(d delta.Delta) risk.RiskResult {

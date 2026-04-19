@@ -272,6 +272,56 @@ func TestBuild_Phase6_DerivedAttributesAndEdges(t *testing.T) {
 	}
 }
 
+// TestBuild_Phase6_IAMAttachment_PolicyARNPassthrough is the contract test
+// that lets the iam_admin_policy_attached risk rule (Phase 6 PR2) inspect a
+// literal policy_arn at the graph node level. If this passthrough breaks,
+// the rule will silently stop firing on AdministratorAccess attachments --
+// catastrophic for the v1.1 detection promise.
+func TestBuild_Phase6_IAMAttachment_PolicyARNPassthrough(t *testing.T) {
+	resources := []models.RawResource{
+		{Type: "aws_iam_role", Name: "app", ID: "aws_iam_role.app"},
+		{
+			Type: "aws_iam_role_policy_attachment", Name: "admin",
+			ID: "aws_iam_role_policy_attachment.admin",
+			Attributes: map[string]any{
+				"policy_arn": "arn:aws:iam::aws:policy/AdministratorAccess",
+			},
+			References: []models.Reference{
+				{SourceAttr: "role", TargetID: "aws_iam_role.app"},
+			},
+		},
+		{
+			Type: "aws_iam_role_policy_attachment", Name: "dynamic",
+			ID: "aws_iam_role_policy_attachment.dynamic",
+			// nil here mirrors what extract.go writes when policy_arn is a
+			// variable / cross-resource reference rather than a literal.
+			Attributes: map[string]any{"policy_arn": nil},
+			References: []models.Reference{
+				{SourceAttr: "role", TargetID: "aws_iam_role.app"},
+			},
+		},
+	}
+
+	g := Build(resources, nil)
+
+	var admin, dynamic models.Node
+	for _, n := range g.Nodes {
+		switch n.ID {
+		case "aws_iam_role_policy_attachment.admin":
+			admin = n
+		case "aws_iam_role_policy_attachment.dynamic":
+			dynamic = n
+		}
+	}
+
+	if got, _ := admin.Attributes["policy_arn"].(string); got != "arn:aws:iam::aws:policy/AdministratorAccess" {
+		t.Errorf("admin attachment: expected policy_arn passthrough as literal string, got %v", admin.Attributes["policy_arn"])
+	}
+	if _, exists := dynamic.Attributes["policy_arn"]; exists {
+		t.Errorf("dynamic attachment: unresolved policy_arn must NOT be promoted to the graph node, got %v", dynamic.Attributes["policy_arn"])
+	}
+}
+
 func TestBuild_EdgeDeduplication(t *testing.T) {
 	resources := []models.RawResource{
 		{

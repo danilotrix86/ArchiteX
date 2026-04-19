@@ -113,6 +113,20 @@ func deriveAttributes(res models.RawResource) map[string]any {
 		"aws_internet_gateway":
 		attrs["public"] = true
 
+	// Phase 6: IAM role-policy attachment. We pass `policy_arn` through to
+	// the graph node when (and only when) it was captured as a literal
+	// string by the parser, so the iam_admin_policy_attached risk rule can
+	// inspect it without re-parsing. Variable-driven ARNs land here as nil
+	// and are intentionally NOT promoted -- we never guess at unresolved
+	// expressions (see risk/rules.go).
+	case "aws_iam_role_policy_attachment":
+		attrs["public"] = false
+		if v, ok := res.Attributes["policy_arn"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				attrs["policy_arn"] = s
+			}
+		}
+
 	default:
 		// Includes the rest of the Phase 6 resources (aws_s3_bucket,
 		// aws_s3_bucket_policy, aws_s3_bucket_public_access_block,

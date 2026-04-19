@@ -80,6 +80,37 @@ func TestSanitize_ReasonCodesContainOnlyRuleIDs(t *testing.T) {
 	}
 }
 
+// TestSanitize_Phase6_ReasonCodesExposed asserts that the three v1.1 rule IDs
+// flow through the egress payload unchanged. Rule IDs are stable identifiers
+// in the cross-customer dataset; renaming or dropping any of them is a
+// breaking schema change. Free-form Message text from RiskReason must NOT
+// appear in the payload (covered separately by TestSanitize_NoTerraformNamesLeak).
+func TestSanitize_Phase6_ReasonCodesExposed(t *testing.T) {
+	rep := Render(top10HighRiskDelta(), runRisk(top10HighRiskDelta()), nil)
+	payload := Sanitize(rep, DefaultSanitizationPolicy())
+
+	wantSubset := []string{
+		"s3_bucket_public_exposure",
+		"iam_admin_policy_attached",
+		"lambda_public_url_introduced",
+	}
+	have := make(map[string]bool, len(payload.ReasonCodes))
+	for _, code := range payload.ReasonCodes {
+		have[code] = true
+	}
+	for _, want := range wantSubset {
+		if !have[want] {
+			t.Errorf("reason_codes missing %q; got %v", want, payload.ReasonCodes)
+		}
+	}
+
+	sorted := append([]string{}, payload.ReasonCodes...)
+	sort.Strings(sorted)
+	if !reflect.DeepEqual(sorted, payload.ReasonCodes) {
+		t.Errorf("reason codes not sorted: %v", payload.ReasonCodes)
+	}
+}
+
 func TestSanitize_ChangedAttributesContainKeysOnly(t *testing.T) {
 	rep := Render(highRiskDelta(), runRisk(highRiskDelta()), nil)
 	payload := Sanitize(rep, DefaultSanitizationPolicy())

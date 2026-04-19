@@ -40,6 +40,12 @@ func Evaluate(d delta.Delta) RiskResult {
 	reasons = append(reasons, evaluateDataExposure(d, len(publicReasons) > 0)...)
 	reasons = append(reasons, evaluateRemoval(d)...)
 
+	// Phase 6 (v1.1) — AWS Top 10 rules. Order does not affect scoring; the
+	// final reason list is sorted by weight desc, rule_id asc by Evaluate.
+	reasons = append(reasons, evaluateS3BucketPublicExposure(d)...)
+	reasons = append(reasons, evaluateIAMAdminAttached(d)...)
+	reasons = append(reasons, evaluateLambdaPublicURL(d)...)
+
 	score := 0.0
 	for _, r := range reasons {
 		score += r.Weight

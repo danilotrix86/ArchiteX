@@ -122,19 +122,46 @@ GITHUB_TOKEN=ghp_xxx ./architex comment ./.architex/<bundle>/ \
   --repo my-org/my-repo --pr 42 --mode advisory
 ```
 
-## Supported resources (v1)
+## Supported resources
 
-| Terraform type | Abstract type |
-|---|---|
-| `aws_vpc` | `network` |
-| `aws_subnet` | `network` |
-| `aws_security_group` | `access_control` |
-| `aws_security_group_rule` | `access_control` |
-| `aws_instance` | `compute` |
-| `aws_lb` | `entry_point` |
-| `aws_db_instance` | `data` |
+ArchiteX recognizes 17 AWS resource types as of v1.1, organized into a small set of abstract architectural roles:
+
+| Terraform type | Abstract type | Since |
+|---|---|---|
+| `aws_vpc` | `network` | v1.0 |
+| `aws_subnet` | `network` | v1.0 |
+| `aws_security_group` | `access_control` | v1.0 |
+| `aws_security_group_rule` | `access_control` | v1.0 |
+| `aws_instance` | `compute` | v1.0 |
+| `aws_lb` | `entry_point` | v1.0 |
+| `aws_db_instance` | `data` | v1.0 |
+| `aws_s3_bucket` | `storage` | v1.1 |
+| `aws_s3_bucket_public_access_block` | `access_control` | v1.1 |
+| `aws_s3_bucket_policy` | `access_control` | v1.1 |
+| `aws_iam_role` | `identity` | v1.1 |
+| `aws_iam_policy` | `identity` | v1.1 |
+| `aws_iam_role_policy_attachment` | `identity` | v1.1 |
+| `aws_lambda_function` | `compute` | v1.1 |
+| `aws_lambda_function_url` | `entry_point` | v1.1 |
+| `aws_apigatewayv2_api` | `entry_point` | v1.1 |
+| `aws_internet_gateway` | `network` | v1.1 |
 
 Unsupported resource types emit a warning and reduce the confidence score -- they never cause failures. `module`, `for_each`, `count`, and `dynamic` blocks are detected and warned about, not silently skipped.
+
+### Risk rules
+
+ArchiteX ships 8 deterministic risk rules. Each contributes a fixed weight to the score (capped at 10.0):
+
+| Rule ID | Weight | Triggers when... | Since |
+|---|---|---|---|
+| `public_exposure_introduced` | 4.0 | A node's `public` attribute changes from `false` to `true`. | v1.0 |
+| `s3_bucket_public_exposure` | 4.0 | An `aws_s3_bucket_public_access_block` is removed, OR an `aws_s3_bucket_policy` is added. | v1.1 |
+| `iam_admin_policy_attached` | 3.5 | An `aws_iam_role_policy_attachment` is added with `policy_arn` ending in `AdministratorAccess` or `IAMFullAccess`. | v1.1 |
+| `new_entry_point` | 3.0 | An added node has abstract type `entry_point` (LB, Lambda URL, API Gateway). | v1.0 |
+| `lambda_public_url_introduced` | 3.0 | An `aws_lambda_function_url` is added (layers on top of `new_entry_point`). | v1.1 |
+| `new_data_resource` | 2.5 | An added node has abstract type `data`. | v1.0 |
+| `potential_data_exposure` | 2.0 | `public_exposure_introduced` fires alongside a data or access-control change. | v1.0 |
+| `resource_removed` | 0.5 | A node was removed. Capped at 2 reasons. | v1.0 |
 
 ## Trust model
 
@@ -146,9 +173,9 @@ See [master.md §6](master.md#6-trust-model-and-data-sanitization) for the full 
 
 ## Roadmap
 
-**v1.0** ships the canonical 3-tier AWS scope: VPC, subnets, security groups, EC2, ALB, RDS. See [CHANGELOG.md](CHANGELOG.md) for what's included.
+**v1.0** shipped the canonical 3-tier AWS scope: VPC, subnets, security groups, EC2, ALB, RDS. See [CHANGELOG.md](CHANGELOG.md) for what's included.
 
-**v1.1** (next) expands to AWS Top 10: S3, IAM, Lambda, API Gateway, Internet Gateway, and more. New risk rules for S3 public-bucket exposure, IAM admin-policy attachment, and Lambda public URLs.
+**v1.1** (current) expands to AWS Top 10: S3, IAM, Lambda, API Gateway v2, Internet Gateway -- 17 supported resource types in total. Adds three new risk rules: `s3_bucket_public_exposure`, `iam_admin_policy_attached`, and `lambda_public_url_introduced`.
 
 **Future** -- user-configurable rule weights and thresholds, multi-provider support, GitLab/Bitbucket, non-Terraform IaC. See [master.md §8](master.md#8-scope-and-roadmap) for the full roadmap.
 

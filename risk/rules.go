@@ -2,6 +2,7 @@ package risk
 
 import (
 	"fmt"
+	"strings"
 
 	"architex/delta"
 )
@@ -121,6 +122,148 @@ func evaluateRemoval(d delta.Delta) []RiskReason {
 			Message: fmt.Sprintf("Resource %s was removed.", n.ID),
 			Impact:  "change",
 			Weight:  0.5,
+		})
+	}
+	return reasons
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 (v1.1) — AWS Top 10 risk rules
+//
+// Each Phase 6 rule keys off a small, deterministic delta-level signal so
+// the engine stays free of cross-resource graph traversal. The trade-off is
+// documented in CHANGELOG.md and llm.md: per-resource signals are slightly
+// noisier than full graph reasoning but ship in days, not weeks.
+// ---------------------------------------------------------------------------
+
+// phase6CapPerRule bounds how many reasons any one Phase 6 rule may emit, so
+// a sweeping refactor (e.g. removing public_access_block on 5 buckets in one
+// PR) cannot single-handedly saturate the 10.0 score cap. A reviewer who
+// sees 2 instances of the same finding will already understand the pattern.
+const phase6CapPerRule = 2
+
+// Rule 6 — S3 bucket public exposure (Phase 6).
+//
+// Per-resource signal model:
+//   - REMOVING an aws_s3_bucket_public_access_block weakens the bucket's
+//     deny-by-default posture and is the single most common cause of S3
+//     leaks observed in postmortems.
+//   - ADDING an aws_s3_bucket_policy may grant public principals; without
+//     full IAM evaluation we conservatively flag the addition for review.
+//
+// We do not infer which bucket is affected by walking edges — the message
+// names the access-control resource itself, which the reviewer can map to
+// its bucket trivially in the diagram.
+//
+// False-positive caveat (documented in CHANGELOG): adding a strict
+// bucket policy that DENIES public access will also trigger this rule.
+// Reviewers can dismiss in the PR thread; we will refine in v1.2.
+func evaluateS3BucketPublicExposure(d delta.Delta) []RiskReason {
+	var reasons []RiskReason
+
+	emit := func(ruleMessage, sourceID string) {
+		if len(reasons) >= phase6CapPerRule {
+			return
+		}
+		reasons = append(reasons, RiskReason{
+			RuleID:  "s3_bucket_public_exposure",
+			Message: fmt.Sprintf(ruleMessage, sourceID),
+			Impact:  "exposure",
+			Weight:  4.0,
+		})
+	}
+
+	for _, n := range d.RemovedNodes {
+		if n.ProviderType == "aws_s3_bucket_public_access_block" {
+			emit("S3 public access block %s was removed; bucket may become publicly accessible.", n.ID)
+		}
+	}
+	for _, n := range d.AddedNodes {
+		if n.ProviderType == "aws_s3_bucket_policy" {
+			emit("S3 bucket policy %s was added; review for public principal grants.", n.ID)
+		}
+	}
+
+	return reasons
+}
+
+// adminPolicyARNSuffixes lists the AWS-managed policy ARNs whose attachment
+// to an IAM role represents an immediate, high-blast-radius privilege grant.
+// We match on suffix because the literal string "arn:aws:iam::aws:policy/X"
+// is the canonical form a Terraform author writes; variable-driven ARNs are
+// captured by the parser as nil and intentionally do not match (we do not
+// guess at unresolved expressions).
+var adminPolicyARNSuffixes = []string{
+	":policy/AdministratorAccess",
+	":policy/IAMFullAccess",
+}
+
+// Rule 7 — IAM admin/dangerous policy attached (Phase 6).
+//
+// Triggers when an aws_iam_role_policy_attachment is ADDED whose policy_arn
+// literal ends in a known wildcard-admin AWS managed policy. Weight 3.5
+// reflects the privilege-escalation impact: an attacker who later compromises
+// any principal assuming this role has root-equivalent access.
+func evaluateIAMAdminAttached(d delta.Delta) []RiskReason {
+	var reasons []RiskReason
+
+	for _, n := range d.AddedNodes {
+		if n.ProviderType != "aws_iam_role_policy_attachment" {
+			continue
+		}
+		raw, ok := n.Attributes["policy_arn"]
+		if !ok {
+			continue
+		}
+		arn, ok := raw.(string)
+		if !ok || arn == "" {
+			continue
+		}
+		matchedSuffix := ""
+		for _, suffix := range adminPolicyARNSuffixes {
+			if strings.HasSuffix(arn, suffix) {
+				matchedSuffix = strings.TrimPrefix(suffix, ":policy/")
+				break
+			}
+		}
+		if matchedSuffix == "" {
+			continue
+		}
+		if len(reasons) >= phase6CapPerRule {
+			break
+		}
+		reasons = append(reasons, RiskReason{
+			RuleID:  "iam_admin_policy_attached",
+			Message: fmt.Sprintf("IAM attachment %s grants %s; review for privilege escalation.", n.ID, matchedSuffix),
+			Impact:  "identity",
+			Weight:  3.5,
+		})
+	}
+
+	return reasons
+}
+
+// Rule 8 — Lambda public function URL introduced (Phase 6).
+//
+// Triggers for each ADDED aws_lambda_function_url. This rule layers on top
+// of the existing new_entry_point rule (3.0) — the two together produce a
+// distinctly higher signal than a generic new entry_point because Lambda
+// URLs bypass API Gateway, WAF, and most observability surface by default,
+// and frequently ship with authorization_type = "NONE".
+func evaluateLambdaPublicURL(d delta.Delta) []RiskReason {
+	var reasons []RiskReason
+	for _, n := range d.AddedNodes {
+		if n.ProviderType != "aws_lambda_function_url" {
+			continue
+		}
+		if len(reasons) >= phase6CapPerRule {
+			break
+		}
+		reasons = append(reasons, RiskReason{
+			RuleID:  "lambda_public_url_introduced",
+			Message: fmt.Sprintf("Public Lambda function URL %s was introduced; verify auth type and WAF coverage.", n.ID),
+			Impact:  "exposure",
+			Weight:  3.0,
 		})
 	}
 	return reasons
