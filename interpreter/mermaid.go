@@ -182,20 +182,31 @@ func renderFromSets(nodes []rendered, edges []renderedEdge, notice truncationNot
 // when keeping nodes within a budget. The order reflects PR-review impact:
 // public-facing entry points and data stores matter most, infrastructure
 // scaffolding least.
+//
+// Phase 6 added two new abstract types ("storage", "identity"). They are
+// inserted into the existing scale rather than appended: storage sits next
+// to data (it is data-at-rest), identity sits below compute but above
+// pure network/access-control (an over-permissive role can dwarf an
+// individual SG-rule change). The "default" arm remains for any future
+// abstract type not yet ranked.
 func typePriority(abstractType string) int {
 	switch abstractType {
 	case "entry_point":
 		return 0
 	case "data":
 		return 1
-	case "compute":
+	case "storage":
 		return 2
-	case "network":
+	case "compute":
 		return 3
-	case "access_control":
+	case "identity":
 		return 4
-	default:
+	case "network":
 		return 5
+	case "access_control":
+		return 6
+	default:
+		return 7
 	}
 }
 

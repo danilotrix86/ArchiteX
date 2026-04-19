@@ -60,7 +60,13 @@ type Reference struct {
 }
 
 // SupportedResources defines the Terraform resource types we handle.
+//
+// The v1.0 set was the canonical 3-tier VPC scope (VPC/subnet/SG/SG-rule/
+// EC2/ALB/RDS). v1.1 ("AWS Top 10", Phase 6) adds 10 more types covering
+// S3, IAM, Lambda, API Gateway v2, and the Internet Gateway -- the
+// resources most commonly seen in real AWS Terraform PRs.
 var SupportedResources = map[string]bool{
+	// v1.0 -- canonical 3-tier VPC scope
 	"aws_vpc":                 true,
 	"aws_subnet":              true,
 	"aws_security_group":      true,
@@ -68,10 +74,31 @@ var SupportedResources = map[string]bool{
 	"aws_instance":            true,
 	"aws_lb":                  true,
 	"aws_db_instance":         true,
+
+	// v1.1 -- AWS Top 10 expansion (Phase 6)
+	"aws_s3_bucket":                     true,
+	"aws_s3_bucket_public_access_block": true,
+	"aws_s3_bucket_policy":              true,
+	"aws_iam_role":                      true,
+	"aws_iam_policy":                    true,
+	"aws_iam_role_policy_attachment":    true,
+	"aws_lambda_function":               true,
+	"aws_lambda_function_url":           true,
+	"aws_apigatewayv2_api":              true,
+	"aws_internet_gateway":              true,
 }
 
 // AbstractionMap maps AWS provider types to generic architecture types.
+//
+// Abstract types in v1.0: compute, data, entry_point, network, access_control.
+// Phase 6 introduces two new abstract types so the new resources still slot
+// into a small, opinionated vocabulary instead of inflating to one type per
+// provider:
+//
+//   - storage  -- S3 buckets (object storage at rest)
+//   - identity -- IAM roles / policies / attachments (principals + permissions)
 var AbstractionMap = map[string]string{
+	// v1.0
 	"aws_instance":            "compute",
 	"aws_db_instance":         "data",
 	"aws_lb":                  "entry_point",
@@ -79,4 +106,16 @@ var AbstractionMap = map[string]string{
 	"aws_subnet":              "network",
 	"aws_security_group":      "access_control",
 	"aws_security_group_rule": "access_control",
+
+	// v1.1 -- Phase 6
+	"aws_s3_bucket":                     "storage",
+	"aws_s3_bucket_public_access_block": "access_control",
+	"aws_s3_bucket_policy":              "access_control",
+	"aws_iam_role":                      "identity",
+	"aws_iam_policy":                    "identity",
+	"aws_iam_role_policy_attachment":    "identity",
+	"aws_lambda_function":               "compute",
+	"aws_lambda_function_url":           "entry_point",
+	"aws_apigatewayv2_api":              "entry_point",
+	"aws_internet_gateway":              "network",
 }

@@ -244,6 +244,56 @@ func TestEvaluate_RemovalCap(t *testing.T) {
 	}
 }
 
+// TestEvaluate_HighRiskFixture_NoRegression locks in the headline number
+// ArchiteX has been quoting since v1.0: testdata/base -> testdata/head
+// produces 9.0 / HIGH / fail (4.0 + 3.0 + 2.0). This is the score that
+// landed on PR #1 in architex-test-customer during Phase 5 live validation
+// and that the README, master.md, and llm.md cite verbatim.
+//
+// The Phase 6 (v1.1) "recognition only" PR must not change this number.
+// If you intentionally rebalance rule weights or introduce a new always-on
+// rule, update this test AND the cited numbers in the docs in the same PR.
+func TestEvaluate_HighRiskFixture_NoRegression(t *testing.T) {
+	d := delta.Delta{
+		AddedNodes: []models.Node{
+			{ID: "aws_lb.web", Type: "entry_point", ProviderType: "aws_lb", Attributes: map[string]any{"public": true}},
+		},
+		AddedEdges: []models.Edge{
+			{From: "aws_lb.web", To: "aws_security_group.web", Type: "attached_to"},
+			{From: "aws_lb.web", To: "aws_subnet.public", Type: "deployed_in"},
+		},
+		ChangedNodes: []delta.ChangedNode{
+			{
+				ID:           "aws_security_group.web",
+				Type:         "access_control",
+				ProviderType: "aws_security_group",
+				ChangedAttributes: map[string]delta.ChangedAttribute{
+					"public": {Before: false, After: true},
+				},
+			},
+		},
+		Summary: delta.DeltaSummary{AddedNodes: 1, AddedEdges: 2, ChangedNodes: 1},
+	}
+
+	r := Evaluate(d)
+
+	if r.Score != 9.0 {
+		t.Fatalf("regression: expected 9.0/10 on the canonical high-risk fixture, got %.1f", r.Score)
+	}
+	if r.Severity != "high" || r.Status != "fail" {
+		t.Fatalf("regression: expected high/fail, got %s/%s", r.Severity, r.Status)
+	}
+	want := []string{"public_exposure_introduced", "new_entry_point", "potential_data_exposure"}
+	if len(r.Reasons) != len(want) {
+		t.Fatalf("expected %d reasons, got %d", len(want), len(r.Reasons))
+	}
+	for i, ruleID := range want {
+		if r.Reasons[i].RuleID != ruleID {
+			t.Errorf("reason[%d]: expected %q, got %q", i, ruleID, r.Reasons[i].RuleID)
+		}
+	}
+}
+
 func TestEvaluate_ScoreCap(t *testing.T) {
 	d := delta.Delta{
 		AddedNodes: []models.Node{

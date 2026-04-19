@@ -9,7 +9,13 @@ import (
 )
 
 // edgeTypeMap encodes source+target resource types to a relationship label.
+//
+// Pairs absent from this map fall through to "references" in inferEdgeType.
+// We only declare a pair explicitly when the relationship has a stronger,
+// well-understood architectural meaning ("attached_to", "deployed_in",
+// "part_of", "applies_to") that helps reviewers read the diagram.
 var edgeTypeMap = map[string]string{
+	// v1.0 -- canonical 3-tier VPC scope
 	"aws_instance|aws_security_group":            "attached_to",
 	"aws_instance|aws_subnet":                    "deployed_in",
 	"aws_subnet|aws_vpc":                         "part_of",
@@ -19,6 +25,21 @@ var edgeTypeMap = map[string]string{
 	"aws_db_instance|aws_subnet":                 "deployed_in",
 	"aws_db_instance|aws_security_group":         "attached_to",
 	"aws_security_group|aws_vpc":                 "part_of",
+
+	// v1.1 -- Phase 6 (AWS Top 10)
+	// S3: access-control resources "apply_to" the bucket they govern.
+	"aws_s3_bucket_public_access_block|aws_s3_bucket": "applies_to",
+	"aws_s3_bucket_policy|aws_s3_bucket":              "applies_to",
+	// IAM: a role-policy attachment binds a role to a policy.
+	"aws_iam_role_policy_attachment|aws_iam_role":   "applies_to",
+	"aws_iam_role_policy_attachment|aws_iam_policy": "applies_to",
+	// Lambda: a function "uses" an execution role; a function URL is
+	// "applied_to" its parent function (same direction as SG-rule -> SG).
+	"aws_lambda_function|aws_iam_role":            "attached_to",
+	"aws_lambda_function_url|aws_lambda_function": "applies_to",
+	// Networking: an internet gateway is "part_of" its VPC, mirroring the
+	// existing aws_subnet|aws_vpc relationship.
+	"aws_internet_gateway|aws_vpc": "part_of",
 }
 
 // Build constructs a Graph from parsed resources and accumulated warnings.
@@ -83,7 +104,23 @@ func deriveAttributes(res models.RawResource) map[string]any {
 		}
 		attrs["public"] = pub
 
+	// Phase 6: resources that, if present, definitionally introduce
+	// internet-facing surface. Marking these public:true at the node level
+	// lets the existing `new_entry_point` rule (Phase 3) and reviewer-focus
+	// templates (Phase 4) work for them with no rule changes.
+	case "aws_lambda_function_url",
+		"aws_apigatewayv2_api",
+		"aws_internet_gateway":
+		attrs["public"] = true
+
 	default:
+		// Includes the rest of the Phase 6 resources (aws_s3_bucket,
+		// aws_s3_bucket_policy, aws_s3_bucket_public_access_block,
+		// aws_iam_*, aws_lambda_function). These are NOT inherently
+		// public on their own -- bucket exposure is governed by sibling
+		// resources (PAB + policy), and IAM is identity-only. Phase 6's
+		// risk rules look at the delta-level shape rather than at a
+		// single derived attribute on these resources.
 		attrs["public"] = false
 	}
 

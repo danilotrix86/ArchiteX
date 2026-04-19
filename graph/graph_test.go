@@ -154,6 +154,124 @@ func TestBuild_InfoWarningDoesNotReduceConfidence(t *testing.T) {
 	}
 }
 
+// TestBuild_Phase6_DerivedAttributesAndEdges locks in the Phase 6 (v1.1)
+// public-attribute defaults and the new edge-type pairs. If you add or
+// reshuffle Phase 6 resources, this test is the contract that downstream
+// rules and the Mermaid renderer rely on.
+func TestBuild_Phase6_DerivedAttributesAndEdges(t *testing.T) {
+	resources := []models.RawResource{
+		// Storage + governance siblings.
+		{Type: "aws_s3_bucket", Name: "logs", ID: "aws_s3_bucket.logs"},
+		{
+			Type: "aws_s3_bucket_public_access_block", Name: "logs", ID: "aws_s3_bucket_public_access_block.logs",
+			References: []models.Reference{{SourceAttr: "bucket", TargetID: "aws_s3_bucket.logs"}},
+		},
+		{
+			Type: "aws_s3_bucket_policy", Name: "logs", ID: "aws_s3_bucket_policy.logs",
+			References: []models.Reference{{SourceAttr: "bucket", TargetID: "aws_s3_bucket.logs"}},
+		},
+
+		// Identity stack.
+		{Type: "aws_iam_role", Name: "app", ID: "aws_iam_role.app"},
+		{Type: "aws_iam_policy", Name: "read", ID: "aws_iam_policy.read"},
+		{
+			Type: "aws_iam_role_policy_attachment", Name: "app_read", ID: "aws_iam_role_policy_attachment.app_read",
+			References: []models.Reference{
+				{SourceAttr: "role", TargetID: "aws_iam_role.app"},
+				{SourceAttr: "policy_arn", TargetID: "aws_iam_policy.read"},
+			},
+		},
+
+		// Lambda + URL + execution role wiring.
+		{
+			Type: "aws_lambda_function", Name: "worker", ID: "aws_lambda_function.worker",
+			References: []models.Reference{{SourceAttr: "role", TargetID: "aws_iam_role.app"}},
+		},
+		{
+			Type: "aws_lambda_function_url", Name: "worker", ID: "aws_lambda_function_url.worker",
+			References: []models.Reference{{SourceAttr: "function_name", TargetID: "aws_lambda_function.worker"}},
+		},
+
+		// Inherently-public Phase 6 nodes.
+		{Type: "aws_apigatewayv2_api", Name: "http", ID: "aws_apigatewayv2_api.http"},
+		{Type: "aws_vpc", Name: "main", ID: "aws_vpc.main"},
+		{
+			Type: "aws_internet_gateway", Name: "main", ID: "aws_internet_gateway.main",
+			References: []models.Reference{{SourceAttr: "vpc_id", TargetID: "aws_vpc.main"}},
+		},
+	}
+
+	g := Build(resources, nil)
+
+	nodeMap := make(map[string]models.Node, len(g.Nodes))
+	for _, n := range g.Nodes {
+		nodeMap[n.ID] = n
+	}
+
+	// --- abstract type + public-attribute contract ---
+	cases := []struct {
+		id           string
+		abstractType string
+		public       bool
+	}{
+		{"aws_s3_bucket.logs", "storage", false},
+		{"aws_s3_bucket_public_access_block.logs", "access_control", false},
+		{"aws_s3_bucket_policy.logs", "access_control", false},
+		{"aws_iam_role.app", "identity", false},
+		{"aws_iam_policy.read", "identity", false},
+		{"aws_iam_role_policy_attachment.app_read", "identity", false},
+		{"aws_lambda_function.worker", "compute", false},
+		{"aws_lambda_function_url.worker", "entry_point", true},
+		{"aws_apigatewayv2_api.http", "entry_point", true},
+		{"aws_internet_gateway.main", "network", true},
+	}
+	for _, c := range cases {
+		n, ok := nodeMap[c.id]
+		if !ok {
+			t.Errorf("missing node %s", c.id)
+			continue
+		}
+		if n.Type != c.abstractType {
+			t.Errorf("node %s: expected abstract type %q, got %q", c.id, c.abstractType, n.Type)
+		}
+		if got, _ := n.Attributes["public"].(bool); got != c.public {
+			t.Errorf("node %s: expected public=%v, got %v", c.id, c.public, n.Attributes["public"])
+		}
+	}
+
+	// --- edge-type contract for the new pairs ---
+	edgeSet := make(map[string]string, len(g.Edges))
+	for _, e := range g.Edges {
+		edgeSet[e.From+"|"+e.To] = e.Type
+	}
+	edgeCases := []struct {
+		from, to, edgeType string
+	}{
+		{"aws_s3_bucket_public_access_block.logs", "aws_s3_bucket.logs", "applies_to"},
+		{"aws_s3_bucket_policy.logs", "aws_s3_bucket.logs", "applies_to"},
+		{"aws_iam_role_policy_attachment.app_read", "aws_iam_role.app", "applies_to"},
+		{"aws_iam_role_policy_attachment.app_read", "aws_iam_policy.read", "applies_to"},
+		{"aws_lambda_function.worker", "aws_iam_role.app", "attached_to"},
+		{"aws_lambda_function_url.worker", "aws_lambda_function.worker", "applies_to"},
+		{"aws_internet_gateway.main", "aws_vpc.main", "part_of"},
+	}
+	for _, c := range edgeCases {
+		got, ok := edgeSet[c.from+"|"+c.to]
+		if !ok {
+			t.Errorf("missing edge %s -> %s", c.from, c.to)
+			continue
+		}
+		if got != c.edgeType {
+			t.Errorf("edge %s -> %s: expected type %q, got %q", c.from, c.to, c.edgeType, got)
+		}
+	}
+
+	// --- confidence must remain pristine: every Phase 6 type is now first-class ---
+	if g.Confidence.Score != 1.0 {
+		t.Errorf("Phase 6 fixture must produce confidence 1.0 (no warnings), got %f", g.Confidence.Score)
+	}
+}
+
 func TestBuild_EdgeDeduplication(t *testing.T) {
 	resources := []models.RawResource{
 		{

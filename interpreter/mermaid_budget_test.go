@@ -88,6 +88,45 @@ func TestRenderMermaidBudgeted_BudgetZeroMeansUnlimited(t *testing.T) {
 	}
 }
 
+// TestTypePriority_Phase6Ordering pins the abstract-type ranking used by
+// the Phase 5.1 budget cap. Phase 6 added two new abstract types ("storage"
+// and "identity"); this test ensures that the priority order is locked in:
+// when forced to drop nodes, an entry_point or data store wins over a
+// mere identity or access_control resource. Reshuffling these ranks is a
+// deliberate decision -- if the test breaks, update both the function and
+// the table here together.
+func TestTypePriority_Phase6Ordering(t *testing.T) {
+	expected := []struct {
+		abstractType string
+		rank         int
+	}{
+		{"entry_point", 0},
+		{"data", 1},
+		{"storage", 2},
+		{"compute", 3},
+		{"identity", 4},
+		{"network", 5},
+		{"access_control", 6},
+		{"unknown_future_type", 7},
+	}
+	for _, c := range expected {
+		if got := typePriority(c.abstractType); got != c.rank {
+			t.Errorf("typePriority(%q) = %d, want %d", c.abstractType, got, c.rank)
+		}
+	}
+
+	// Strict-monotonic check: each declared type must rank STRICTLY above
+	// the next. Equal ranks would silently break the budget cap's
+	// deterministic tiebreaker (it would fall through to ID alphabetical
+	// instead of type, which is rarely what we want).
+	for i := 1; i < len(expected); i++ {
+		if typePriority(expected[i-1].abstractType) >= typePriority(expected[i].abstractType) {
+			t.Errorf("typePriority must be strictly monotonic, but %q >= %q",
+				expected[i-1].abstractType, expected[i].abstractType)
+		}
+	}
+}
+
 func TestRenderMermaidBudgeted_KeepsEdgesOnlyWhenBothEndpointsKept(t *testing.T) {
 	d := largeDelta(100)
 	out := RenderMermaidBudgeted(d, 5000)

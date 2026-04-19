@@ -170,9 +170,15 @@ func TestParseDir_CIDRBlocks(t *testing.T) {
 }
 
 func TestParseDir_UnsupportedResource(t *testing.T) {
+	// Note: aws_s3_bucket became supported in Phase 6 (v1.1). Use a type we
+	// genuinely do not handle yet to exercise the unsupported-resource path.
+	// aws_dynamodb_table is a deliberate next-Top-10 candidate that is NOT
+	// yet in models.SupportedResources, so it is a stable choice here.
 	tf := `
-resource "aws_s3_bucket" "logs" {
-  bucket = "my-logs"
+resource "aws_dynamodb_table" "sessions" {
+  name         = "sessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
 }
 
 resource "aws_vpc" "main" {
@@ -242,6 +248,75 @@ module "vpc" {
 	}
 	if !warningsContain(warnings, "module") {
 		t.Error("expected warning about module block")
+	}
+}
+
+// TestParseDir_Phase6Resources_AllRecognized verifies that every Phase 6
+// (v1.1 "AWS Top 10") resource type is recognized by the parser without
+// emitting `unsupported_resource` warnings. The companion check on the
+// graph layer (TestBuild_Phase6_DerivedAttributesAndEdges) confirms that
+// each abstract type and edge type is wired through correctly.
+func TestParseDir_Phase6Resources_AllRecognized(t *testing.T) {
+	resources, warnings, err := ParseDir("../testdata/top10_resources")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if w.Category == models.WarnUnsupportedResource {
+			t.Errorf("unexpected unsupported_resource warning: %s", w.Message)
+		}
+	}
+
+	expected := []string{
+		"aws_s3_bucket.logs",
+		"aws_s3_bucket_public_access_block.logs",
+		"aws_s3_bucket_policy.logs",
+		"aws_iam_role.lambda_exec",
+		"aws_iam_policy.read_only",
+		"aws_iam_role_policy_attachment.lambda_read_only",
+		"aws_lambda_function.worker",
+		"aws_lambda_function_url.worker",
+		"aws_apigatewayv2_api.http",
+		"aws_internet_gateway.main",
+	}
+	for _, id := range expected {
+		if findResource(resources, id) == nil {
+			t.Errorf("Phase 6 resource %s was not parsed", id)
+		}
+	}
+}
+
+// TestParseDir_Phase6_PolicyArnLiteralCaptured ensures the parser preserves
+// the literal `policy_arn` string on aws_iam_role_policy_attachment, which
+// the Phase 6 iam_admin_policy_attached rule will key off.
+func TestParseDir_Phase6_PolicyArnLiteralCaptured(t *testing.T) {
+	tf := `
+resource "aws_iam_role" "app" {
+  name               = "x"
+  assume_role_policy = "{}"
+}
+
+resource "aws_iam_role_policy_attachment" "admin" {
+  role       = aws_iam_role.app.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+`
+	dir := writeTempTF(t, tf)
+	resources, _, err := ParseDir(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	att := findResource(resources, "aws_iam_role_policy_attachment.admin")
+	if att == nil {
+		t.Fatal("aws_iam_role_policy_attachment.admin not found")
+	}
+	got, ok := att.Attributes["policy_arn"].(string)
+	if !ok {
+		t.Fatalf("policy_arn was %T (%v), expected string literal", att.Attributes["policy_arn"], att.Attributes["policy_arn"])
+	}
+	if !strings.HasSuffix(got, "AdministratorAccess") {
+		t.Errorf("expected policy_arn to retain AdministratorAccess suffix, got %q", got)
 	}
 }
 
