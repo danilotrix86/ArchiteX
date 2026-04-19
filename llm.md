@@ -52,6 +52,25 @@ Phase 5 packages the Phase 1-4 deterministic pipeline as a GitHub Action. Every 
 - New `docs/github-action.md`: consumer-facing documentation (inputs, permissions, three rollout phases mirroring master.md §11, trust model, local-equivalence recipe)
 - 9 new unit tests in `github/client_test.go` covering create-when-absent, update-when-present, ignore-non-marker comments, follow-pagination, auth/header injection, refusal-on-empty-marker, refusal-on-body-without-marker, non-success-error, and `parseNextLink`
 
+### Phase 5 -- Live Validation
+
+Validated end-to-end on real GitHub Actions infrastructure, not only in local unit tests. A standalone consumer repo `danilotrix86/architex-test-customer` was created from scratch with a 10-line workflow consuming `danilotrix86/ArchiteX@phase5`. PR #1 introduced a public ALB and opened a security group to `0.0.0.0/0`.
+
+Outcome:
+- Workflow ran in ~30s on `ubuntu-latest`.
+- The PR comment was posted by the `github-actions` bot with **9.0/10 HIGH risk, status: fail**, exactly matching the predicted score (`public_exposure_introduced` 4.0 + `new_entry_point` 3.0 + `potential_data_exposure` 2.0).
+- The Mermaid delta diagram, plain-English summary, review-focus bullets, and policy section all rendered correctly in GitHub's Markdown renderer.
+- Sticky-comment behavior verified: after a workflow rerun, the PR still had exactly one ArchiteX comment (updated in place via `UpsertStickyComment`).
+- The audit bundle artifact was uploaded (2955 bytes, 5 files) and downloaded successfully; `manifest.json` checksums verified.
+- Advisory mode kept the check green despite `status: fail` -- as designed (decision 29).
+
+Two `action.yml` follow-up fixes came out of the live test (commit `ec38a98`) that local unit tests could not have caught:
+
+1. **`actions/upload-artifact@v4` skips hidden directories by default.** The audit bundle lives under `.architex/` (dot-prefixed), so the upload step found "no files". Fixed with `include-hidden-files: true`. Keep this in mind if the bundle directory is ever renamed -- if it stops being dot-prefixed, the input is no longer needed but is harmless.
+2. **`actions/setup-go@v5` looks for `go.sum` in `github.workspace`** (the consumer repo) by default, which never contains a `go.sum`. Fixed with explicit `cache-dependency-path: ${{ format('{0}/go.sum', github.action_path) }}` so module caching is keyed off the action's own `go.sum`.
+
+Test artifacts (kept for reference, not committed): `architex-test-customer#1` PR, run `24632879205`, artifact `architex-audit-24632879205`.
+
 ### Phase 4 (COMPLETE)
 
 - Deterministic Interpreter Layer via `interpreter.Render(d, r, interp) Report`
@@ -685,4 +704,4 @@ Done before starting Phase 4. No rule semantics or scoring weights changed; this
 - No multi-provider support (AWS only)
 - No `Meta` field on Node (noted as future addition for derived metadata separate from `Attributes`)
 - No environment-tag inference yet (`SanitizationPolicy` has only `HashSalt`; environment knobs will be added when the parser learns to infer them)
-- No published release tags -- consumers must currently reference the action by SHA or branch (`uses: <owner>/architex@main`); a `v1` tag + signed releases are the next packaging step
+- No published release tags -- the consumer flow is end-to-end validated (see "Phase 5 -- Live Validation"), but consumers currently must reference the action by SHA or branch (`uses: <owner>/architex@main`). A `v1` tag + signed releases are the next packaging step.
