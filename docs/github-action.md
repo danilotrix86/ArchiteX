@@ -27,12 +27,14 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1
+      - uses: danilotrix86/ArchiteX@v1.2.0
         with:
           terraform-dir: infra
 ```
 
 That's it. Every PR touching `infra/*.tf` will get a sticky ArchiteX comment. Nothing fails the check.
+
+Pin to an exact version (`v1.2.0`, `v1.1.0`, ...) -- see the [Versioning](#versioning) section below for why.
 
 ## Inputs
 
@@ -73,7 +75,7 @@ ArchiteX is meant to be adopted in three phases. The Action makes each one a one
 ### Phase 1 -- Visibility
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1
+- uses: danilotrix86/ArchiteX@v1.2.0
   with:
     terraform-dir: infra
     mode: advisory     # default; never fails the check
@@ -88,7 +90,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 ### Phase 3 -- Enforced governance
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1
+- uses: danilotrix86/ArchiteX@v1.2.0
   with:
     terraform-dir: infra
     mode: blocking     # exits non-zero when risk.Status == "fail"
@@ -166,23 +168,22 @@ These Terraform constructs are detected and warned about, not silently skipped:
 
 ## Limitations
 
-- AWS Terraform resources only (see table above). Broader coverage is planned for v1.1.
+- AWS Terraform resources only (34 types as of v1.2 -- see [README §Supported resources](../README.md#supported-resources)). Broader provider and resource coverage continues each minor release.
 - The diagram shows one layer of dependencies (changed nodes plus direct edge endpoints); deeper expansion is on the roadmap.
 - Multi-provider, GitLab, Bitbucket, and non-Terraform IaC are out of scope for v1.
 
 ## Versioning
 
-ArchiteX uses two tag schemes:
-
-- **Immutable tags** (`v1.0.0`, `v1.1.0`, ...) point at a single commit forever. Use these when you need full reproducibility.
-- **Floating major tag** (`v1`) points at the latest `v1.x.x` release and is advanced manually after each minor/patch release. Use this for convenience -- it always gets you the latest compatible version.
-
-In your workflow:
+**Always pin to an exact, immutable version tag** (`v1.2.0`, `v1.1.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
 
 ```yaml
-# Recommended: floating major tag (always latest v1.x)
-- uses: danilotrix86/ArchiteX@v1
-
-# Pinned: exact version (immutable)
-- uses: danilotrix86/ArchiteX@v1.0.0
+- uses: danilotrix86/ArchiteX@v1.2.0
 ```
+
+Pinning is recommended because:
+
+1. **Auditability.** A security-review tool that silently changes its own behaviour under your CI is a contradiction. Pinning means the rules you reviewed last week are the rules running today.
+2. **Reproducibility.** If a PR's score changes, you know it's because the Terraform changed -- not because ArchiteX changed.
+3. **Explicit upgrades.** When you bump `v1.2.0` -> `v1.3.0`, you read the [CHANGELOG](../CHANGELOG.md) and decide whether to take it.
+
+To upgrade, check the [Releases page](https://github.com/danilotrix86/ArchiteX/releases) and bump the tag in your workflow file. Renovate / Dependabot can automate the PRs.

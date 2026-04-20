@@ -32,17 +32,19 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1
+      - uses: danilotrix86/ArchiteX@v1.2.0
         with:
           terraform-dir: infra
 ```
 
 That's it. Every PR touching `infra/*.tf` gets a sticky ArchiteX comment. Nothing fails the check.
 
+Pin to a specific version (recommended). See [Releases](https://github.com/danilotrix86/ArchiteX/releases) for the changelog when upgrading.
+
 Want enforcement? Change one line:
 
 ```yaml
-      - uses: danilotrix86/ArchiteX@v1
+      - uses: danilotrix86/ArchiteX@v1.2.0
         with:
           terraform-dir: infra
           mode: blocking
