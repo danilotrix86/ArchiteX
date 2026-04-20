@@ -1,0 +1,89 @@
+name: Deploy GitHub Pages
+
+# v1.3 PR5 -- the landing page lives at docs/site/index.html and is paired
+# with a freshly-rendered sample report.html generated from
+# examples/01-public-alb on every push to main. The site is intentionally
+# zero-build: plain HTML/CSS, no JS, no remote fonts. Renders identically
+# in any browser, including air-gapped ones.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'examples/**'
+      - 'main.go'
+      - 'parser/**'
+      - 'graph/**'
+      - 'delta/**'
+      - 'risk/**'
+      - 'interpreter/**'
+      - 'models/**'
+      - 'config/**'
+      - 'baseline/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site + live sample report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build architex
+        run: go build -o architex .
+
+      - name: Stage docs/site as the publishable root
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp -r docs/site/. _site/
+
+      - name: Render live sample report from examples/01-public-alb
+        run: |
+          set -euo pipefail
+          mkdir -p .live
+          ./architex report ./examples/01-public-alb/base ./examples/01-public-alb/head --out ./.live > /dev/null
+          BUNDLE="$(ls -td .live/*/ | head -1)"
+          if [ ! -f "${BUNDLE}report.html" ]; then
+            echo "::error::expected ${BUNDLE}report.html to exist"
+            exit 1
+          fi
+          cp "${BUNDLE}report.html" _site/report.html
+          echo "Live sample report copied to _site/report.html ($(wc -c < _site/report.html) bytes)"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
