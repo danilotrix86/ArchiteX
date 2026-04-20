@@ -27,14 +27,14 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.3.0
+      - uses: danilotrix86/ArchiteX@v1.3.1
         with:
           terraform-dir: infra
 ```
 
 That's it. Every PR touching `infra/*.tf` will get a sticky ArchiteX comment. Nothing fails the check.
 
-Pin to an exact version (`v1.3.0`, `v1.2.0`, `v1.1.0`, ...) -- see the [Versioning](#versioning) section below for why.
+Pin to an exact version (`v1.3.1`, `v1.3.0`, `v1.2.0`, ...) -- see the [Versioning](#versioning) section below for why.
 
 ## Inputs
 
@@ -75,7 +75,7 @@ ArchiteX is meant to be adopted in three phases. The Action makes each one a one
 ### Phase 1 -- Visibility
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.0
+- uses: danilotrix86/ArchiteX@v1.3.1
   with:
     terraform-dir: infra
     mode: advisory     # default; never fails the check
@@ -90,7 +90,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 ### Phase 3 -- Enforced governance
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.0
+- uses: danilotrix86/ArchiteX@v1.3.1
   with:
     terraform-dir: infra
     mode: blocking     # exits non-zero when risk.Status == "fail"
@@ -141,30 +141,34 @@ You can verify the caps locally with `scripts/stress-mermaid.ps1` -- it generate
 
 ## Supported resources
 
-ArchiteX v1 handles the canonical 3-tier AWS stack:
+ArchiteX v1.3 recognises **45 AWS resource types** across seven abstract roles (network, access_control, compute, entry_point, data, storage, identity). The full table -- with the version each type landed in -- is the single source of truth in [README § Coverage](../README.md#-coverage). At a glance:
 
-| Terraform type | Abstract type |
-|---|---|
-| `aws_vpc` | `network` |
-| `aws_subnet` | `network` |
-| `aws_security_group` | `access_control` |
-| `aws_security_group_rule` | `access_control` |
-| `aws_instance` | `compute` |
-| `aws_lb` | `entry_point` |
-| `aws_db_instance` | `data` |
+| Family | Examples | Abstract role |
+|---|---|---|
+| Network | `aws_vpc`, `aws_subnet`, `aws_internet_gateway`, `aws_nat_gateway`, `aws_route53_zone`, `aws_route53_record`, `aws_db_subnet_group` | `network` |
+| Access control | `aws_security_group`, `aws_security_group_rule`, `aws_network_acl`, `aws_network_acl_rule`, `aws_s3_bucket_public_access_block`, `aws_s3_bucket_policy`, `aws_sns_topic_policy`, `aws_sqs_queue_policy`, `aws_db_parameter_group`, `aws_db_option_group` | `access_control` |
+| Compute | `aws_instance`, `aws_lambda_function`, `aws_ecs_cluster`, `aws_ecs_service`, `aws_ecs_task_definition`, `aws_eks_cluster`, `aws_eks_node_group`, `aws_eks_addon`, `aws_eks_fargate_profile`, `aws_launch_template`, `aws_autoscaling_group`, `aws_autoscaling_policy` | `compute` |
+| Entry points | `aws_lb`, `aws_lambda_function_url`, `aws_apigatewayv2_api`, `aws_cloudfront_distribution` | `entry_point` |
+| Data | `aws_db_instance`, `aws_sns_topic`, `aws_sqs_queue`, `aws_secretsmanager_secret` | `data` |
+| Storage | `aws_s3_bucket`, `aws_ebs_volume` | `storage` |
+| Identity | `aws_iam_role`, `aws_iam_policy`, `aws_iam_role_policy_attachment`, `aws_kms_key`, `aws_kms_alias`, `aws_eks_identity_provider_config` | `identity` |
 
 Unsupported resource types are logged as warnings (category `unsupported_resource`) and reduce the confidence score; they do not cause failures.
 
-### Unsupported constructs
-
-These Terraform constructs are detected and warned about, not silently skipped:
+### Terraform constructs
 
 | Construct | Result |
 |---|---|
-| `for_each` / `count` on a resource | Resource skipped (warning) |
-| `dynamic` nested block | Resource skipped (warning) |
-| `module` block | No resource produced (warning) |
-| Unknown resource type | Resource skipped (warning) |
+| Local `module` blocks (`source = "./..."` / `"../..."` / absolute) | **Expanded recursively** (since v1.2). Resources are namespaced `module.<name>.<id>`. Remote module sources still warn-and-skip to preserve the runner-local trust model. |
+| `count = <int>` / `count = length([...])` | **Expanded** into N independent resources suffixed `[0]`, `[1]`, ... (since v1.2). `count = 0` produces zero resources. |
+| `count = var.<flag> ? 1 : 0` (and `length(var.X) > 0 ? 1 : 0`) | **Library mode only** (`parser.mode: library` in `.architex.yml`, since v1.3). Each gate materializes one **conditional phantom** marked with `?` in the diagram; risk rules refuse to score phantoms. In default `consumer` mode, these still warn-and-skip. |
+| `for_each = { ... }` / `for_each = toset([...])` with literal keys | **Expanded** into one resource per key, suffixed `["<key>"]` (since v1.2). Variable-driven `for_each` warns and skips. |
+| `dynamic "block" { for_each = [...] }` with literal iterator | **Materialized** per iteration before attribute extraction (since v1.2). |
+| `policy = jsonencode({ ... })` on `aws_s3_bucket_policy` / SNS / SQS policies | **Resolved** to a literal JSON string and forwarded to risk rules (since v1.2). |
+| `data "aws_iam_policy" "x" { arn = "<literal>" }` referenced as `data.aws_iam_policy.x.arn` | **Pre-scanned and resolved** at extraction time (since v1.2). |
+| Remote `module` (registry, `git::`, `https://`) | Warn-and-skip (intentional, per trust model). |
+| Variable-driven `count`, `for_each`, or attributes the parser cannot resolve | Warn-and-skip. The engine never invents resources from unresolved expressions. |
+| Unknown resource type | Resource skipped with `unsupported_resource` warning. |
 
 ## Limitations
 
@@ -174,16 +178,16 @@ These Terraform constructs are detected and warned about, not silently skipped:
 
 ## Versioning
 
-**Always pin to an exact, immutable version tag** (`v1.3.0`, `v1.2.0`, `v1.1.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
+**Always pin to an exact, immutable version tag** (`v1.3.1`, `v1.3.0`, `v1.2.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.0
+- uses: danilotrix86/ArchiteX@v1.3.1
 ```
 
 Pinning is recommended because:
 
 1. **Auditability.** A security-review tool that silently changes its own behaviour under your CI is a contradiction. Pinning means the rules you reviewed last week are the rules running today.
 2. **Reproducibility.** If a PR's score changes, you know it's because the Terraform changed -- not because ArchiteX changed.
-3. **Explicit upgrades.** When you bump `v1.3.0` -> `v1.4.0`, you read the [CHANGELOG](../CHANGELOG.md) and decide whether to take it.
+3. **Explicit upgrades.** When you bump `v1.3.1` -> `v1.4.0`, you read the [CHANGELOG](../CHANGELOG.md) and decide whether to take it.
 
 To upgrade, check the [Releases page](https://github.com/danilotrix86/ArchiteX/releases) and bump the tag in your workflow file. Renovate / Dependabot can automate the PRs.

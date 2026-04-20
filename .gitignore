@@ -32,8 +32,5 @@ dist/
 # runs to GiB-scale on a full top-50 sweep, never appropriate to commit.
 .validation-runs/
 
-# Internal dev notes (intentionally not published)
-# llm.md is the maintainer's onboarding/context journal -- it documents
-# weak spots, design trade-offs, and not-yet-built work that aren't
-# appropriate for the public repo. Keep it on disk, do not commit it.
+# Local scratch notes
 llm.md

@@ -4,6 +4,43 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-20
+
+Documentation, repo-hygiene, and CI-stability follow-up to v1.3.0. **No
+behavior changes**: the parser, graph builder, delta engine, risk rules,
+interpreter, baseline engine, and on-disk audit-bundle layout are
+bit-identical to v1.3.0.
+
+The reason for the patch release is that the v1.3.0 tag commit
+(`bac0e3f`) had two transient red selftest runs against it before the CI
+pipeline was stabilized in two follow-up commits on `main`. The v1.3.1
+tag points at a commit where the full CI matrix is green, so the release
+commit shows a clean status badge.
+
+### Changed
+
+- `docs/github-action.md` — "Supported resources" and "Terraform
+  constructs" tables rewritten to reflect v1.3 reality: 45 resource types
+  across 7 abstract roles, literal `count` / `for_each` / `dynamic`
+  expansion (since v1.2), local-module recursion (since v1.2), and
+  library-mode conditional `count` phantoms (since v1.3). The previous
+  tables were carried over from v1.0 and listed only 7 resources.
+- `risk/baseline_rules.go` — three baseline novelty rules
+  (`first_time_resource_type`, `first_time_abstract_type`,
+  `first_time_edge_pair`) renumbered in source comments from
+  Rule 13 / 14 / 15 to Rule 16 / 17 / 18 to deduplicate with the
+  Tranche-3 rule numbering in `risk/rules_v13.go`. Source-comment-only
+  change; runtime behavior is unaffected.
+- `.gitignore` — replaced the apologetic comment block above `llm.md`
+  with a one-line "local scratch notes" comment.
+
+### Added
+
+- `SECURITY.md` — security disclosure policy pointing reporters at
+  GitHub private security advisories, with response-time expectations
+  and a supported-versions section. Resolves the "no SECURITY.md"
+  finding from the v1.3 launch audit.
+
 ## [1.3.0] - 2026-04-20
 
 The "Launch" release (Phase 8). Closes the highest-leverage coverage gap

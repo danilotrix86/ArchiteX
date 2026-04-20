@@ -29,7 +29,7 @@ import (
 // caps to 1) does not require touching Phase 6 constants.
 const firstTimeCapPerRule = 2
 
-// Rule 13 — first_time_resource_type.
+// Rule 16 — first_time_resource_type.
 //
 // Triggers per added node whose ProviderType has never appeared in the
 // baseline. ProviderType is the Terraform-level type (e.g. "aws_kms_key"),
@@ -73,7 +73,7 @@ func evaluateFirstTimeResourceType(d delta.Delta, b *baseline.Baseline) []RiskRe
 	return reasons
 }
 
-// Rule 14 — first_time_abstract_type.
+// Rule 17 — first_time_abstract_type.
 //
 // Triggers when an added node's abstract type (e.g. "entry_point",
 // "identity", "storage") has never appeared in the baseline. This is the
@@ -114,7 +114,7 @@ func evaluateFirstTimeAbstractType(d delta.Delta, b *baseline.Baseline) []RiskRe
 	return reasons
 }
 
-// Rule 15 — first_time_edge_pair.
+// Rule 18 — first_time_edge_pair.
 //
 // Triggers when an added edge connects two providerTypes whose pair has
 // never appeared in the baseline. Pairs are (sourceProviderType,
