@@ -64,7 +64,9 @@ type Reference struct {
 // The v1.0 set was the canonical 3-tier VPC scope (VPC/subnet/SG/SG-rule/
 // EC2/ALB/RDS). v1.1 ("AWS Top 10", Phase 6) adds 10 more types covering
 // S3, IAM, Lambda, API Gateway v2, and the Internet Gateway -- the
-// resources most commonly seen in real AWS Terraform PRs.
+// resources most commonly seen in real AWS Terraform PRs. v1.2 ("Coverage
+// tranche 2", Phase 7 PR4) adds CloudFront, Route53, KMS, SNS, SQS, NAT
+// Gateway, NACL, Secrets Manager, EBS, and ECS.
 var SupportedResources = map[string]bool{
 	// v1.0 -- canonical 3-tier VPC scope
 	"aws_vpc":                 true,
@@ -86,6 +88,25 @@ var SupportedResources = map[string]bool{
 	"aws_lambda_function_url":           true,
 	"aws_apigatewayv2_api":              true,
 	"aws_internet_gateway":              true,
+
+	// v1.2 -- Coverage tranche 2 (Phase 7 PR4)
+	"aws_cloudfront_distribution": true,
+	"aws_route53_zone":            true,
+	"aws_route53_record":          true,
+	"aws_kms_key":                 true,
+	"aws_kms_alias":               true,
+	"aws_sns_topic":               true,
+	"aws_sns_topic_policy":        true,
+	"aws_sqs_queue":               true,
+	"aws_sqs_queue_policy":        true,
+	"aws_nat_gateway":             true,
+	"aws_network_acl":             true,
+	"aws_network_acl_rule":        true,
+	"aws_secretsmanager_secret":   true,
+	"aws_ebs_volume":              true,
+	"aws_ecs_cluster":             true,
+	"aws_ecs_service":             true,
+	"aws_ecs_task_definition":     true,
 }
 
 // AbstractionMap maps AWS provider types to generic architecture types.
@@ -118,4 +139,31 @@ var AbstractionMap = map[string]string{
 	"aws_lambda_function_url":           "entry_point",
 	"aws_apigatewayv2_api":              "entry_point",
 	"aws_internet_gateway":              "network",
+
+	// v1.2 -- Phase 7 PR4 (Coverage tranche 2). No new abstract types are
+	// introduced -- everything slots into the seven established roles. KMS
+	// keys/aliases are "identity" because their key policies act like IAM
+	// policies (subject access control). SNS/SQS topics/queues are "data"
+	// because they hold messages at rest. SNS/SQS *policies*, NACLs, and
+	// NACL rules are "access_control" because they govern WHO may touch
+	// the underlying resource. Secrets Manager is "data" (sensitive
+	// payload at rest, sibling to a DB). EBS volumes are "storage". ECS
+	// resources are "compute".
+	"aws_cloudfront_distribution": "entry_point",
+	"aws_route53_zone":            "network",
+	"aws_route53_record":          "network",
+	"aws_kms_key":                 "identity",
+	"aws_kms_alias":               "identity",
+	"aws_sns_topic":               "data",
+	"aws_sns_topic_policy":        "access_control",
+	"aws_sqs_queue":               "data",
+	"aws_sqs_queue_policy":        "access_control",
+	"aws_nat_gateway":             "network",
+	"aws_network_acl":             "access_control",
+	"aws_network_acl_rule":        "access_control",
+	"aws_secretsmanager_secret":   "data",
+	"aws_ebs_volume":              "storage",
+	"aws_ecs_cluster":             "compute",
+	"aws_ecs_service":             "compute",
+	"aws_ecs_task_definition":     "compute",
 }

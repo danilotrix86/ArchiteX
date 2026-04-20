@@ -6,19 +6,53 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
+	"github.com/zclconf/go-cty/cty/function/stdlib"
 
 	"architex/models"
 )
 
+// minimalEvalContext registers the small set of HCL stdlib functions whose
+// inputs are commonly literal strings/objects/lists in the wild. Keeping the
+// set tight is intentional: every function we register here is a function
+// whose evaluation contract we accept (no side effects, no IO, deterministic).
+//
+// Today only `jsonencode` is registered, so policies written as
+// `policy = jsonencode({Statement = [...]})` resolve to a literal JSON
+// string the S3 rule can inspect for `Effect = "Deny"` (Phase 7 PR2).
+//
+// Variables are NEVER added to this context. An expression that references
+// var.*, local.*, or another resource still evaluates to an error and the
+// attribute lands as nil -- preserving design decision 14: the engine
+// never guesses at unresolved expressions.
+var minimalEvalContext = &hcl.EvalContext{
+	Functions: map[string]function.Function{
+		"jsonencode": stdlib.JSONEncodeFunc,
+	},
+}
+
 // extractAttributes tries to evaluate each attribute to a literal value.
 // Expressions that depend on variables will fail -- that's expected and fine.
 // Also walks nested blocks (ingress, egress, etc.) to surface their attributes.
-func extractAttributes(body *hclsyntax.Body) map[string]any {
+//
+// Phase 7: a non-nil ctx unlocks two extra resolutions:
+//   - `policy_arn` on aws_iam_role_policy_attachment can be resolved when it
+//     points at a data block we pre-scanned (ctx.dataPolicyARNs).
+//   - jsonencode(literal) is evaluable via minimalEvalContext.
+func extractAttributes(body *hclsyntax.Body, ctx *parseContext) map[string]any {
 	attrs := make(map[string]any)
 
 	for name, attr := range body.Attributes {
-		val, diags := attr.Expr.Value(nil)
+		val, diags := attr.Expr.Value(minimalEvalContext)
 		if diags.HasErrors() {
+			// Phase 7: targeted data-source resolution before giving up.
+			// Only the explicit allowlist in resolveDataPolicyARN matches.
+			if name == "policy_arn" {
+				if resolved := resolveDataPolicyARN(attr.Expr, ctx); resolved != "" {
+					attrs[name] = resolved
+					continue
+				}
+			}
 			attrs[name] = nil
 			continue
 		}
@@ -35,7 +69,7 @@ func extractAttributes(body *hclsyntax.Body) map[string]any {
 				key = nested.Type + "." + name
 			}
 
-			val, diags := attr.Expr.Value(nil)
+			val, diags := attr.Expr.Value(minimalEvalContext)
 			if diags.HasErrors() {
 				// Mirror the top-level path: record the key with nil so
 				// downstream consumers know the attribute existed but was

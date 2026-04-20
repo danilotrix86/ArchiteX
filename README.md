@@ -94,7 +94,7 @@ ArchiteX uses a strict four-stage pipeline:
 3. **Risk & Policy Engine** -- 5 built-in rules, weighted scoring, explainable reasons
 4. **Interpreter** -- Mermaid diagram, plain-English summary, review-focus bullets, Markdown PR comment
 
-Every stage except the Interpreter's prose generation is fully deterministic. The Interpreter is template-based today (no LLM). See [master.md](master.md) for the full architecture specification.
+Every stage is fully deterministic. The Interpreter is template-based — no inference, no model calls, no network. The same input produces byte-identical output across runs. See [master.md](master.md) for the full architecture specification.
 
 ## Local CLI usage
 
@@ -124,7 +124,7 @@ GITHUB_TOKEN=ghp_xxx ./architex comment ./.architex/<bundle>/ \
 
 ## Supported resources
 
-ArchiteX recognizes 17 AWS resource types as of v1.1, organized into a small set of abstract architectural roles:
+ArchiteX recognizes 34 AWS resource types as of v1.2 (Phase 7), organized into a small set of abstract architectural roles:
 
 | Terraform type | Abstract type | Since |
 |---|---|---|
@@ -145,29 +145,110 @@ ArchiteX recognizes 17 AWS resource types as of v1.1, organized into a small set
 | `aws_lambda_function_url` | `entry_point` | v1.1 |
 | `aws_apigatewayv2_api` | `entry_point` | v1.1 |
 | `aws_internet_gateway` | `network` | v1.1 |
+| `aws_cloudfront_distribution` | `entry_point` | v1.2 |
+| `aws_route53_zone` | `network` | v1.2 |
+| `aws_route53_record` | `network` | v1.2 |
+| `aws_nat_gateway` | `network` | v1.2 |
+| `aws_kms_key` | `identity` | v1.2 |
+| `aws_kms_alias` | `identity` | v1.2 |
+| `aws_sns_topic` | `data` | v1.2 |
+| `aws_sns_topic_policy` | `access_control` | v1.2 |
+| `aws_sqs_queue` | `data` | v1.2 |
+| `aws_sqs_queue_policy` | `access_control` | v1.2 |
+| `aws_secretsmanager_secret` | `data` | v1.2 |
+| `aws_network_acl` | `access_control` | v1.2 |
+| `aws_network_acl_rule` | `access_control` | v1.2 |
+| `aws_ebs_volume` | `storage` | v1.2 |
+| `aws_ecs_cluster` | `compute` | v1.2 |
+| `aws_ecs_task_definition` | `compute` | v1.2 |
+| `aws_ecs_service` | `compute` | v1.2 |
 
-Unsupported resource types emit a warning and reduce the confidence score -- they never cause failures. `module`, `for_each`, `count`, and `dynamic` blocks are detected and warned about, not silently skipped.
+Unsupported resource types emit a warning and reduce the confidence score -- they never cause failures. As of v1.2 (Phase 7), the parser also expands:
+
+- **Local `module` blocks** (`source = "./..."` / `"../..."` / absolute paths) -- recursively, with resource IDs namespaced as `module.<name>.<original_id>`. Remote module sources (registry, `git::`, `https://`) intentionally still warn-and-skip; fetching them would introduce a new outbound network surface.
+- **`count = <int>`** and **`count = length([...])`** -- one resource per index, suffixed `[0]`, `[1]`, ...
+- **`for_each = { ... }`** / **`toset([...])`** with literal keys -- one resource per key, suffixed `["<key>"]`.
+- **`dynamic "block" { for_each = [...] }`** with literal iterators -- materialized before attribute extraction.
+
+Variable-driven `count` / `for_each` / `dynamic` constructs still warn-and-skip on purpose: ArchiteX never invents resources from values it cannot resolve.
+
+## Configuration (v1.2, optional)
+
+Drop a `.architex.yml` at the root of your Terraform directory to tune the engine. Every field is optional; an absent file reproduces v1.1 behavior bit-for-bit.
+
+```yaml
+rules:
+  iam_admin_policy_attached:
+    weight: 5.0      # bump default 3.5 -> 5.0
+  s3_bucket_public_exposure:
+    enabled: false   # silence the rule entirely
+
+thresholds:
+  warn: 3.0          # >= warn -> medium / warn  (default 3.0)
+  fail: 7.0          # >= fail -> high   / fail  (default 7.0)
+
+ignore:
+  paths:
+    - "**/legacy/**" # parser skips matching .tf files
+
+suppressions:
+  - rule: lambda_public_url_introduced
+    resource: aws_lambda_function_url.maintenance
+    reason: "Maintenance lambda; auth type is AWS_IAM"
+    expires: "2026-12-31"   # optional; expired entries still drop the rule
+                            # but get an (EXPIRED) flag in the PR comment
+```
+
+You can also place inline directives directly above a resource block:
+
+```hcl
+# architex:ignore=s3_bucket_public_exposure reason="Static docs site, intentional"
+resource "aws_s3_bucket_policy" "docs" {
+  ...
+}
+```
+
+Suppressed findings are NEVER silent: they appear in a dedicated **Suppressed Findings** section in the PR comment (with their reason and source) and contribute to the egress payload's `suppressed_count` so reviewers always know how much was filtered.
 
 ### Risk rules
 
-ArchiteX ships 8 deterministic risk rules. Each contributes a fixed weight to the score (capped at 10.0):
+ArchiteX ships 15 deterministic risk rules. Each contributes a fixed weight to the score (capped at 10.0):
 
 | Rule ID | Weight | Triggers when... | Since |
 |---|---|---|---|
 | `public_exposure_introduced` | 4.0 | A node's `public` attribute changes from `false` to `true`. | v1.0 |
 | `s3_bucket_public_exposure` | 4.0 | An `aws_s3_bucket_public_access_block` is removed, OR an `aws_s3_bucket_policy` is added. | v1.1 |
 | `iam_admin_policy_attached` | 3.5 | An `aws_iam_role_policy_attachment` is added with `policy_arn` ending in `AdministratorAccess` or `IAMFullAccess`. | v1.1 |
-| `new_entry_point` | 3.0 | An added node has abstract type `entry_point` (LB, Lambda URL, API Gateway). | v1.0 |
+| `messaging_topic_public` | 3.5 | An added `aws_sns_topic_policy` / `aws_sqs_queue_policy` whose resolved JSON has an `Allow` statement with `Principal = "*"`. | v1.2 |
+| `nacl_allow_all_ingress` | 3.5 | An added `aws_network_acl_rule` with literal `cidr_block = "0.0.0.0/0"`, `egress = false`, AND `rule_action = "allow"`. | v1.2 |
+| `new_entry_point` | 3.0 | An added node has abstract type `entry_point` (LB, Lambda URL, API Gateway, CloudFront). | v1.0 |
 | `lambda_public_url_introduced` | 3.0 | An `aws_lambda_function_url` is added (layers on top of `new_entry_point`). | v1.1 |
+| `ebs_volume_unencrypted` | 3.0 | An added `aws_ebs_volume` has explicit literal `encrypted = false`. Variable-driven `encrypted` does NOT fire. | v1.2 |
 | `new_data_resource` | 2.5 | An added node has abstract type `data`. | v1.0 |
+| `cloudfront_no_waf` | 2.5 | An added `aws_cloudfront_distribution` has no literal `web_acl_id`. | v1.2 |
 | `potential_data_exposure` | 2.0 | `public_exposure_introduced` fires alongside a data or access-control change. | v1.0 |
+| `first_time_abstract_type` | 1.5 | An added node's abstract type (e.g. `entry_point`, `identity`) has never appeared in `.architex/baseline.json`. Silenced when no baseline exists. | v1.2 |
+| `first_time_resource_type` | 1.0 | An added node's Terraform type (e.g. `aws_kms_key`) has never appeared in `.architex/baseline.json`. Silenced when no baseline exists. | v1.2 |
 | `resource_removed` | 0.5 | A node was removed. Capped at 2 reasons. | v1.0 |
+| `first_time_edge_pair` | 0.5 | An added edge connects two provider types whose pair has never appeared in `.architex/baseline.json`. Silenced when no baseline exists. | v1.2 |
+
+#### Baseline anomaly rules (v1.2)
+
+The three `first_time_*` rules consume an optional `.architex/baseline.json` snapshot that records the *kinds* of resources, abstract types, and edge pairs your repo has ever contained -- no raw HCL, no resource names, no attribute values, just sets of types. Generate or extend it with:
+
+```bash
+architex baseline ./infra                # writes ./infra/.architex/baseline.json
+architex baseline ./infra --merge        # union with the existing snapshot
+architex baseline ./infra --out path.json
+```
+
+Commit the baseline alongside your Terraform. From then on, `score` / `report` / `sanitize` auto-load it from the head directory and surface novel additions with a low-weight signal that *layers on top* of the existing rules: a brand-new public CloudFront distribution in a repo that has never had an `entry_point` before scores `new_entry_point` (3.0) + `first_time_abstract_type` (1.5) + `first_time_resource_type` (1.0) = 5.5 (medium) instead of 3.0. Repos with no baseline file behave bit-identically to v1.1.
 
 ## Trust model
 
 - **Analysis runs locally on the runner.** Parsing, graph construction, delta, risk evaluation, and Markdown rendering all happen in the `architex` binary. No `.tf` source is transmitted anywhere.
 - **The only network call is the PR comment.** `architex comment` POSTs the rendered Markdown to the GitHub REST API using `GITHUB_TOKEN`. That's the same token your other workflow steps already have.
-- **The audit bundle is always uploaded.** Every run produces a timestamped bundle (`diagram.mmd`, `summary.md`, `score.json`, `egress.json`, `manifest.json` with SHA-256 checksums) uploaded as a workflow artifact.
+- **The audit bundle is always uploaded.** Every run produces a timestamped bundle (`diagram.mmd`, `summary.md`, `score.json`, `egress.json`, `report.html`, `manifest.json` with SHA-256 checksums) uploaded as a workflow artifact. `report.html` is a single self-contained page with no JavaScript, no CDN scripts, and no remote fonts -- a reviewer can open it in an air-gapped browser and see the full report.
 
 See [master.md §6](master.md#6-trust-model-and-data-sanitization) for the full trust model, sanitization controls, and egress specification.
 
@@ -175,9 +256,20 @@ See [master.md §6](master.md#6-trust-model-and-data-sanitization) for the full 
 
 **v1.0** shipped the canonical 3-tier AWS scope: VPC, subnets, security groups, EC2, ALB, RDS. See [CHANGELOG.md](CHANGELOG.md) for what's included.
 
-**v1.1** (current) expands to AWS Top 10: S3, IAM, Lambda, API Gateway v2, Internet Gateway -- 17 supported resource types in total. Adds three new risk rules: `s3_bucket_public_exposure`, `iam_admin_policy_attached`, and `lambda_public_url_introduced`.
+**v1.1** expands to AWS Top 10: S3, IAM, Lambda, API Gateway v2, Internet Gateway -- 17 supported resource types in total. Adds three new risk rules: `s3_bucket_public_exposure`, `iam_admin_policy_attached`, and `lambda_public_url_introduced`.
 
-**Future** -- user-configurable rule weights and thresholds, multi-provider support, GitLab/Bitbucket, non-Terraform IaC. See [master.md §8](master.md#8-scope-and-roadmap) for the full roadmap.
+**v1.2** is the "Depth & Configurability" release:
+
+- **Parser depth** -- local `module` recursion, literal `count` / `for_each` / `dynamic` expansion, `data.aws_iam_policy.x.arn` resolution, `jsonencode({...})` policy evaluation.
+- **User config** -- optional `.architex.yml` (rule weights, enabled flags, warn/fail thresholds, ignore.paths) plus inline `# architex:ignore=` directives. Suppressed findings stay visible in a dedicated PR-comment section.
+- **AWS coverage tranche 2** -- 17 more resource types (CloudFront, Route53, KMS, SNS/SQS, NAT GW, NACL, Secrets Manager, EBS, ECS) -- 34 in total.
+- **4 new risk rules** -- `cloudfront_no_waf`, `ebs_volume_unencrypted`, `messaging_topic_public`, `nacl_allow_all_ingress`.
+- **Baseline anomaly detection** -- new `architex baseline` subcommand and three `first_time_*` rules that flag the first time a new resource type, abstract category, or edge pair appears in your repo.
+- **Self-contained HTML report** -- every audit bundle now includes a `report.html` that opens in any browser (no JavaScript, no CDN, no remote fonts) and surfaces the full review with severity badges, reasons, suppressions, delta diagram, and SHA-256 manifest table.
+
+A repo with no `.architex.yml`, no inline directives, and no baseline file produces bit-identical output to v1.1.
+
+**Future** -- multi-provider support, GitLab/Bitbucket, non-Terraform IaC. See [master.md §8](master.md#8-scope-and-roadmap) for the full roadmap.
 
 ## Contributing
 

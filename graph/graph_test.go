@@ -272,6 +272,188 @@ func TestBuild_Phase6_DerivedAttributesAndEdges(t *testing.T) {
 	}
 }
 
+// TestBuild_Tranche2_DerivedAttributesAndEdges locks in the Phase 7 PR4
+// (v1.2) abstract types, public-attribute defaults, and new edge-type
+// pairs introduced by the tranche-2 resource expansion.
+func TestBuild_Tranche2_DerivedAttributesAndEdges(t *testing.T) {
+	resources := []models.RawResource{
+		{Type: "aws_vpc", Name: "main", ID: "aws_vpc.main"},
+		{
+			Type: "aws_subnet", Name: "main", ID: "aws_subnet.main",
+			References: []models.Reference{{SourceAttr: "vpc_id", TargetID: "aws_vpc.main"}},
+		},
+
+		{
+			Type: "aws_cloudfront_distribution", Name: "edge", ID: "aws_cloudfront_distribution.edge",
+			Attributes: map[string]any{"web_acl_id": "arn:aws:wafv2:us-east-1:123:global/webacl/x/y"},
+		},
+		{Type: "aws_route53_zone", Name: "main", ID: "aws_route53_zone.main"},
+		{
+			Type: "aws_route53_record", Name: "www", ID: "aws_route53_record.www",
+			References: []models.Reference{{SourceAttr: "zone_id", TargetID: "aws_route53_zone.main"}},
+		},
+		{Type: "aws_kms_key", Name: "main", ID: "aws_kms_key.main"},
+		{
+			Type: "aws_kms_alias", Name: "main", ID: "aws_kms_alias.main",
+			References: []models.Reference{{SourceAttr: "target_key_id", TargetID: "aws_kms_key.main"}},
+		},
+		{Type: "aws_sns_topic", Name: "alerts", ID: "aws_sns_topic.alerts"},
+		{
+			Type: "aws_sns_topic_policy", Name: "alerts", ID: "aws_sns_topic_policy.alerts",
+			Attributes: map[string]any{"policy": `{"Statement":[{"Effect":"Allow","Principal":"*"}]}`},
+			References: []models.Reference{{SourceAttr: "arn", TargetID: "aws_sns_topic.alerts"}},
+		},
+		{Type: "aws_sqs_queue", Name: "jobs", ID: "aws_sqs_queue.jobs"},
+		{
+			Type: "aws_sqs_queue_policy", Name: "jobs", ID: "aws_sqs_queue_policy.jobs",
+			References: []models.Reference{{SourceAttr: "queue_url", TargetID: "aws_sqs_queue.jobs"}},
+		},
+		{
+			Type: "aws_nat_gateway", Name: "main", ID: "aws_nat_gateway.main",
+			References: []models.Reference{{SourceAttr: "subnet_id", TargetID: "aws_subnet.main"}},
+		},
+		{
+			Type: "aws_network_acl", Name: "main", ID: "aws_network_acl.main",
+			References: []models.Reference{
+				{SourceAttr: "vpc_id", TargetID: "aws_vpc.main"},
+				{SourceAttr: "subnet_ids", TargetID: "aws_subnet.main"},
+			},
+		},
+		{
+			Type: "aws_network_acl_rule", Name: "open", ID: "aws_network_acl_rule.open",
+			Attributes: map[string]any{
+				"cidr_block":  "0.0.0.0/0",
+				"egress":      false,
+				"rule_action": "allow",
+			},
+			References: []models.Reference{{SourceAttr: "network_acl_id", TargetID: "aws_network_acl.main"}},
+		},
+		{Type: "aws_secretsmanager_secret", Name: "db", ID: "aws_secretsmanager_secret.db"},
+		{
+			Type: "aws_ebs_volume", Name: "data", ID: "aws_ebs_volume.data",
+			Attributes: map[string]any{"encrypted": true},
+		},
+		{Type: "aws_ecs_cluster", Name: "main", ID: "aws_ecs_cluster.main"},
+		{Type: "aws_ecs_task_definition", Name: "app", ID: "aws_ecs_task_definition.app"},
+		{
+			Type: "aws_ecs_service", Name: "app", ID: "aws_ecs_service.app",
+			References: []models.Reference{
+				{SourceAttr: "cluster", TargetID: "aws_ecs_cluster.main"},
+				{SourceAttr: "task_definition", TargetID: "aws_ecs_task_definition.app"},
+			},
+		},
+	}
+
+	g := Build(resources, nil)
+
+	nodeMap := make(map[string]models.Node, len(g.Nodes))
+	for _, n := range g.Nodes {
+		nodeMap[n.ID] = n
+	}
+
+	cases := []struct {
+		id           string
+		abstractType string
+		public       bool
+	}{
+		{"aws_cloudfront_distribution.edge", "entry_point", true},
+		{"aws_route53_zone.main", "network", false},
+		{"aws_route53_record.www", "network", false},
+		{"aws_kms_key.main", "identity", false},
+		{"aws_kms_alias.main", "identity", false},
+		{"aws_sns_topic.alerts", "data", false},
+		{"aws_sns_topic_policy.alerts", "access_control", false},
+		{"aws_sqs_queue.jobs", "data", false},
+		{"aws_sqs_queue_policy.jobs", "access_control", false},
+		{"aws_nat_gateway.main", "network", false},
+		{"aws_network_acl.main", "access_control", false},
+		{"aws_network_acl_rule.open", "access_control", false},
+		{"aws_secretsmanager_secret.db", "data", false},
+		{"aws_ebs_volume.data", "storage", false},
+		{"aws_ecs_cluster.main", "compute", false},
+		{"aws_ecs_task_definition.app", "compute", false},
+		{"aws_ecs_service.app", "compute", false},
+	}
+	for _, c := range cases {
+		n, ok := nodeMap[c.id]
+		if !ok {
+			t.Errorf("missing node %s", c.id)
+			continue
+		}
+		if n.Type != c.abstractType {
+			t.Errorf("node %s: expected abstract type %q, got %q", c.id, c.abstractType, n.Type)
+		}
+		if got, _ := n.Attributes["public"].(bool); got != c.public {
+			t.Errorf("node %s: expected public=%v, got %v", c.id, c.public, n.Attributes["public"])
+		}
+	}
+
+	// CloudFront's literal web_acl_id must be promoted so cloudfront_no_waf
+	// can read it without re-parsing.
+	cf := nodeMap["aws_cloudfront_distribution.edge"]
+	if got, _ := cf.Attributes["web_acl_id"].(string); got == "" {
+		t.Errorf("expected literal web_acl_id passthrough, got %v", cf.Attributes["web_acl_id"])
+	}
+
+	// Resolved SNS policy literal must reach the node so messaging_topic_public
+	// can inspect Statement[].Effect.
+	sns := nodeMap["aws_sns_topic_policy.alerts"]
+	if got, _ := sns.Attributes["policy"].(string); got == "" {
+		t.Errorf("expected SNS topic policy literal passthrough, got %v", sns.Attributes["policy"])
+	}
+
+	// EBS encrypted=true literal must be promoted so the rule can short-circuit.
+	ebs := nodeMap["aws_ebs_volume.data"]
+	if got, ok := ebs.Attributes["encrypted"].(bool); !ok || !got {
+		t.Errorf("expected EBS encrypted=true passthrough, got %v", ebs.Attributes["encrypted"])
+	}
+
+	// NACL literals (cidr_block, egress, rule_action) must all promote.
+	nacl := nodeMap["aws_network_acl_rule.open"]
+	if got, _ := nacl.Attributes["cidr_block"].(string); got != "0.0.0.0/0" {
+		t.Errorf("NACL cidr_block passthrough = %v", nacl.Attributes["cidr_block"])
+	}
+	if got, ok := nacl.Attributes["egress"].(bool); !ok || got {
+		t.Errorf("NACL egress passthrough = %v", nacl.Attributes["egress"])
+	}
+	if got, _ := nacl.Attributes["rule_action"].(string); got != "allow" {
+		t.Errorf("NACL rule_action passthrough = %v", nacl.Attributes["rule_action"])
+	}
+
+	edgeSet := make(map[string]string, len(g.Edges))
+	for _, e := range g.Edges {
+		edgeSet[e.From+"|"+e.To] = e.Type
+	}
+	edgeCases := []struct {
+		from, to, edgeType string
+	}{
+		{"aws_route53_record.www", "aws_route53_zone.main", "part_of"},
+		{"aws_kms_alias.main", "aws_kms_key.main", "applies_to"},
+		{"aws_sns_topic_policy.alerts", "aws_sns_topic.alerts", "applies_to"},
+		{"aws_sqs_queue_policy.jobs", "aws_sqs_queue.jobs", "applies_to"},
+		{"aws_nat_gateway.main", "aws_subnet.main", "deployed_in"},
+		{"aws_network_acl.main", "aws_vpc.main", "part_of"},
+		{"aws_network_acl.main", "aws_subnet.main", "applies_to"},
+		{"aws_network_acl_rule.open", "aws_network_acl.main", "applies_to"},
+		{"aws_ecs_service.app", "aws_ecs_cluster.main", "deployed_in"},
+		{"aws_ecs_service.app", "aws_ecs_task_definition.app", "uses"},
+	}
+	for _, c := range edgeCases {
+		got, ok := edgeSet[c.from+"|"+c.to]
+		if !ok {
+			t.Errorf("missing edge %s -> %s", c.from, c.to)
+			continue
+		}
+		if got != c.edgeType {
+			t.Errorf("edge %s -> %s: expected type %q, got %q", c.from, c.to, c.edgeType, got)
+		}
+	}
+
+	if g.Confidence.Score != 1.0 {
+		t.Errorf("tranche-2 fixture must produce confidence 1.0 (no warnings), got %f", g.Confidence.Score)
+	}
+}
+
 // TestBuild_Phase6_IAMAttachment_PolicyARNPassthrough is the contract test
 // that lets the iam_admin_policy_attached risk rule (Phase 6 PR2) inspect a
 // literal policy_arn at the graph node level. If this passthrough breaks,

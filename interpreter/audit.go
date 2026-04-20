@@ -12,8 +12,9 @@ import (
 )
 
 // ToolVersion is the ArchiteX build identifier embedded in audit manifests.
-// Bump when the audit bundle layout changes.
-const ToolVersion = "0.4.0"
+// Bump when the audit bundle layout changes. v1.2 (this release) added
+// `report.html` to the bundle and is therefore a layout bump.
+const ToolVersion = "0.5.0"
 
 // AuditOptions configures a single WriteAudit call. Clock is injected for
 // deterministic tests; production callers leave it nil.
@@ -89,7 +90,13 @@ func WriteAudit(rep Report, opts AuditOptions) (AuditBundle, error) {
 	}
 	files["egress.json"] = append(egressJSON, '\n')
 
-	checksums := make(map[string]string, len(files))
+	// Compute non-HTML checksums first so the manifest passed to FormatHTML
+	// already contains the verifiable file list. The HTML page references
+	// those checksums (so a reviewer reading report.html alone can verify
+	// the sibling artifacts) -- but report.html is intentionally NOT in
+	// the manifest.Files map (a manifest cannot contain a checksum of a
+	// page that itself displays the checksums; that would be a chicken/egg).
+	checksums := make(map[string]string, len(files)+1)
 	for name, data := range files {
 		path := filepath.Join(bundleDir, name)
 		if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -110,6 +117,15 @@ func WriteAudit(rep Report, opts AuditOptions) (AuditBundle, error) {
 		Status:      rep.Risk.Status,
 		Files:       checksums,
 	}
+
+	// Phase 7 PR6: self-contained report.html (no JS, no external assets,
+	// no network at render time). Written AFTER the manifest is built so
+	// the rendered table can show every other artifact's SHA-256.
+	htmlBytes := []byte(FormatHTML(rep, manifest))
+	if err := os.WriteFile(filepath.Join(bundleDir, "report.html"), htmlBytes, 0o644); err != nil {
+		return AuditBundle{}, fmt.Errorf("audit: write report.html: %w", err)
+	}
+
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return AuditBundle{}, fmt.Errorf("audit: marshal manifest: %w", err)

@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"architex/baseline"
+	"architex/config"
 	"architex/delta"
 	gh "architex/github"
 	"architex/graph"
@@ -46,6 +48,7 @@ Usage:
   architex score    <base-dir> <head-dir>
   architex report   <base-dir> <head-dir> [--out <dir>] [--salt <salt>]
   architex sanitize <base-dir> <head-dir> [--salt <salt>]
+  architex baseline <dir> [--out <path>] [--merge]
   architex comment  <bundle-dir> --repo <owner/repo> --pr <num> [--mode advisory|blocking] [--token-env GITHUB_TOKEN]
 `
 
@@ -82,6 +85,8 @@ func main() {
 		os.Exit(runReport(os.Args[2:]))
 	case "sanitize":
 		os.Exit(runSanitize(os.Args[2:]))
+	case "baseline":
+		os.Exit(runBaseline(os.Args[2:]))
 	case "comment":
 		os.Exit(runComment(os.Args[2:]))
 	case "-h", "--help", "help":
@@ -98,7 +103,8 @@ func runGraph(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: architex graph <dir>")
 		return 2
 	}
-	g, err := buildGraph(args[0])
+	cfg := loadConfigForDir(args[0])
+	g, err := buildGraphWith(args[0], cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[architex] error: %v\n", err)
 		return 1
@@ -111,7 +117,8 @@ func runDiff(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: architex diff <base-dir> <head-dir>")
 		return 2
 	}
-	base, head, code := buildBaseHead(args[0], args[1])
+	cfg := loadConfigForDir(args[1])
+	base, head, code := buildBaseHeadWith(args[0], args[1], cfg)
 	if code != 0 {
 		return code
 	}
@@ -125,12 +132,14 @@ func runScore(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: architex score <base-dir> <head-dir>")
 		return 2
 	}
-	base, head, code := buildBaseHead(args[0], args[1])
+	cfg := loadConfigForDir(args[1])
+	bl := loadBaselineForDir(args[1])
+	base, head, code := buildBaseHeadWith(args[0], args[1], cfg)
 	if code != 0 {
 		return code
 	}
 	d := delta.Compare(base, head)
-	result := risk.Evaluate(d)
+	result := risk.EvaluateWithBaseline(d, cfg, bl, time.Now())
 
 	fmt.Fprintf(os.Stderr, "[architex] delta: %s\n", delta.HumanSummary(d))
 	logRisk(result)
@@ -152,12 +161,14 @@ func runReport(args []string) int {
 		return 2
 	}
 
-	base, head, code := buildBaseHead(rest[0], rest[1])
+	cfg := loadConfigForDir(rest[1])
+	bl := loadBaselineForDir(rest[1])
+	base, head, code := buildBaseHeadWith(rest[0], rest[1], cfg)
 	if code != 0 {
 		return code
 	}
 	d := delta.Compare(base, head)
-	result := risk.Evaluate(d)
+	result := risk.EvaluateWithBaseline(d, cfg, bl, time.Now())
 	rep := interpreter.Render(d, result, nil)
 
 	logRisk(result)
@@ -197,18 +208,74 @@ func runSanitize(args []string) int {
 		return 2
 	}
 
-	base, head, code := buildBaseHead(rest[0], rest[1])
+	cfg := loadConfigForDir(rest[1])
+	bl := loadBaselineForDir(rest[1])
+	base, head, code := buildBaseHeadWith(rest[0], rest[1], cfg)
 	if code != 0 {
 		return code
 	}
 	d := delta.Compare(base, head)
-	result := risk.Evaluate(d)
+	result := risk.EvaluateWithBaseline(d, cfg, bl, time.Now())
 	rep := interpreter.Render(d, result, nil)
 	payload := interpreter.Sanitize(rep, interpreter.SanitizationPolicy{HashSalt: *salt})
 
 	fmt.Fprintf(os.Stderr, "[architex] egress payload schema=%s severity=%s status=%s\n",
 		payload.SchemaVersion, payload.Severity, payload.Status)
 	return writeJSON(os.Stdout, payload)
+}
+
+// runBaseline writes (or extends) a `.architex/baseline.json` snapshot of a
+// directory's current architecture graph. Used to enable the Phase 7 PR5
+// `first_time_*` anomaly rules. Without `--merge` the file is replaced by
+// the current snapshot; with `--merge` the existing file is loaded and the
+// current snapshot is unioned into it (so a sweep across multiple stacks
+// can incrementally build a single baseline). The output path defaults to
+// `<dir>/.architex/baseline.json`.
+func runBaseline(args []string) int {
+	fs := flag.NewFlagSet("baseline", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	out := fs.String("out", "", "explicit output path (default: <dir>/.architex/baseline.json)")
+	merge := fs.Bool("merge", false, "union with the existing baseline at --out instead of replacing it")
+	flagArgs, positional := splitFlagsAndPositional(args)
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if len(positional) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: architex baseline <dir> [--out <path>] [--merge]")
+		return 2
+	}
+	dir := positional[0]
+	outPath := *out
+	if outPath == "" {
+		outPath = filepath.Join(dir, baseline.FileName)
+	}
+
+	cfg := loadConfigForDir(dir)
+	g, err := buildGraphWith(dir, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[architex] error: %v\n", err)
+		return 1
+	}
+
+	snap := baseline.FromGraph(g, time.Now())
+	if *merge {
+		existing, err := baseline.Load(outPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[architex] WARN baseline merge: %v -- writing fresh snapshot\n", err)
+		} else if existing != nil {
+			snap = baseline.Merge(existing, snap)
+			snap.GeneratedAt = time.Now().UTC()
+		}
+	}
+
+	if err := baseline.Save(outPath, snap); err != nil {
+		fmt.Fprintf(os.Stderr, "[architex] error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr,
+		"[architex] baseline written: %s (%d provider types, %d abstract types, %d edge pairs)\n",
+		outPath, len(snap.ProviderTypes), len(snap.AbstractTypes), len(snap.EdgePairs))
+	return 0
 }
 
 // runComment posts (or updates) the bundle's summary.md as a sticky PR
@@ -381,12 +448,19 @@ func capCommentBody(body []byte, maxBytes int) []byte {
 // buildBaseHead parses both directories and returns the constructed graphs.
 // On error it writes a stderr diagnostic and returns a non-zero exit code.
 func buildBaseHead(baseDir, headDir string) (models.Graph, models.Graph, int) {
-	base, err := buildGraph(baseDir)
+	return buildBaseHeadWith(baseDir, headDir, nil)
+}
+
+// buildBaseHeadWith is the configurable variant. The same cfg is applied to
+// both base and head graphs; this matches the user expectation that "ignore
+// path X" means "X never enters my graph", regardless of which side.
+func buildBaseHeadWith(baseDir, headDir string, cfg *config.Config) (models.Graph, models.Graph, int) {
+	base, err := buildGraphWith(baseDir, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[architex] error parsing base: %v\n", err)
 		return models.Graph{}, models.Graph{}, 1
 	}
-	head, err := buildGraph(headDir)
+	head, err := buildGraphWith(headDir, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[architex] error parsing head: %v\n", err)
 		return models.Graph{}, models.Graph{}, 1
@@ -405,7 +479,14 @@ func logRisk(r risk.RiskResult) {
 // buildGraph parses a directory and constructs the graph, emitting parser
 // warnings to stderr as a side effect.
 func buildGraph(dir string) (models.Graph, error) {
-	resources, warnings, err := parser.ParseDir(dir)
+	return buildGraphWith(dir, nil)
+}
+
+// buildGraphWith is the configurable variant -- a non-nil cfg is forwarded
+// to the parser so ignore.paths patterns drop matching .tf files before they
+// ever enter the graph.
+func buildGraphWith(dir string, cfg *config.Config) (models.Graph, error) {
+	resources, warnings, err := parser.ParseDirWith(dir, cfg)
 	if err != nil {
 		return models.Graph{}, err
 	}
@@ -413,6 +494,57 @@ func buildGraph(dir string) (models.Graph, error) {
 		fmt.Fprintf(os.Stderr, "[architex] WARN [%s]: %s\n", w.Category, w.Message)
 	}
 	return graph.Build(resources, warnings), nil
+}
+
+// loadConfigForDir loads `.architex.yml` from dir (no error if absent), then
+// merges any inline `# architex:ignore=...` directives discovered in the same
+// directory tree. A returned nil *Config means "no config" -- callers must
+// behave identically to a v1.1 run in that case.
+//
+// Errors are emitted to stderr but never abort the run; a malformed config
+// file degrades to "no config" so a typo cannot brick CI.
+func loadConfigForDir(dir string) *config.Config {
+	cfgPath := filepath.Join(dir, config.FileName)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[architex] WARN config: %v -- continuing with defaults\n", err)
+		return nil
+	}
+	inline, err := config.ScanInlineSuppressions(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[architex] WARN config: inline scan: %v\n", err)
+	}
+	if cfg == nil && len(inline) == 0 {
+		return nil
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	cfg.Add(inline...)
+	fmt.Fprintf(os.Stderr, "[architex] config: loaded (%d rule overrides, %d ignore paths, %d suppressions)\n",
+		len(cfg.Rules), len(cfg.Ignore.Paths), len(cfg.Suppressions))
+	return cfg
+}
+
+// loadBaselineForDir loads `.architex/baseline.json` from `dir` (no error
+// if absent), returning nil when no baseline is present so the caller's
+// `first_time_*` rules stay silent. A malformed baseline is treated as
+// "no baseline" with a stderr warning, matching the loadConfigForDir
+// degradation policy: a typo in baseline.json must never brick CI.
+func loadBaselineForDir(dir string) *baseline.Baseline {
+	path := filepath.Join(dir, baseline.FileName)
+	bl, err := baseline.Load(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[architex] WARN baseline: %v -- continuing without baseline rules\n", err)
+		return nil
+	}
+	if bl == nil {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr,
+		"[architex] baseline: loaded %s (%d provider types, %d abstract types, %d edge pairs)\n",
+		path, len(bl.ProviderTypes), len(bl.AbstractTypes), len(bl.EdgePairs))
+	return bl
 }
 
 // splitFlagsAndPositional separates an arg slice into flag args (anything

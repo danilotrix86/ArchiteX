@@ -16,7 +16,8 @@
     "changed_nodes",
     "added_edges",
     "removed_edges",
-    "summary"
+    "summary",
+    "suppressed_count"
   ],
   "properties": {
     "schema_version": { "type": "string", "description": "Semver of this schema." },
@@ -60,6 +61,11 @@
         "removed_edges": { "type": "integer", "minimum": 0 },
         "changed_nodes": { "type": "integer", "minimum": 0 }
       }
+    },
+    "suppressed_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of risk findings silenced by .architex.yml or inline `# architex:ignore=` directives. The count is exposed (so reviewers can see the team uses suppressions) but the suppressed rule IDs and resource IDs are intentionally NOT transmitted."
     }
   },
   "definitions": {

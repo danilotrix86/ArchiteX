@@ -248,7 +248,7 @@ func TestEvaluate_RemovalCap(t *testing.T) {
 // ArchiteX has been quoting since v1.0: testdata/base -> testdata/head
 // produces 9.0 / HIGH / fail (4.0 + 3.0 + 2.0). This is the score that
 // landed on PR #1 in architex-test-customer during Phase 5 live validation
-// and that the README, master.md, and llm.md cite verbatim.
+// and that the README and master.md cite verbatim.
 //
 // The Phase 6 (v1.1) "recognition only" PR must not change this number.
 // If you intentionally rebalance rule weights or introduce a new always-on
@@ -534,6 +534,99 @@ func TestEvaluate_Phase6Integration_Top10Fixture(t *testing.T) {
 		if !hasRuleID(r.Reasons, want) {
 			t.Errorf("expected rule %q to fire on the top10 integration fixture", want)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 (v1.2 PR2) -- caveat fixes for the v1.1 rules.
+// ---------------------------------------------------------------------------
+
+// TestEvaluate_S3Policy_DenyOnly_Suppressed verifies the Phase 7 PR2 fix
+// for the documented v1.1 false positive: when an aws_s3_bucket_policy is
+// added whose every Statement has Effect="Deny", the rule MUST suppress
+// the finding (the policy cannot grant public access). Variable-driven
+// policies still fire conservatively (covered by the v1.1 test above).
+func TestEvaluate_S3Policy_DenyOnly_Suppressed(t *testing.T) {
+	denyOnly := `{"Version":"2012-10-17","Statement":[` +
+		`{"Effect":"Deny","Principal":"*","Action":"s3:*","Resource":"*"},` +
+		`{"Effect":"Deny","Principal":{"AWS":"*"},"Action":"s3:GetObject","Resource":"*"}` +
+		`]}`
+	d := delta.Delta{
+		AddedNodes: []models.Node{
+			{
+				ID:           "aws_s3_bucket_policy.locked",
+				Type:         "access_control",
+				ProviderType: "aws_s3_bucket_policy",
+				Attributes: map[string]any{
+					"public": false,
+					"policy": denyOnly,
+				},
+			},
+		},
+		Summary: delta.DeltaSummary{AddedNodes: 1},
+	}
+
+	r := Evaluate(d)
+
+	if hasRuleID(r.Reasons, "s3_bucket_public_exposure") {
+		t.Fatal("PR2: deny-only bucket policies must NOT trigger s3_bucket_public_exposure")
+	}
+	if r.Score != 0.0 {
+		t.Errorf("expected score 0.0 for suppressed deny-only policy, got %.1f", r.Score)
+	}
+}
+
+// TestEvaluate_S3Policy_MixedEffects_StillFires verifies that any non-Deny
+// statement keeps the rule firing -- a single Allow can grant public access
+// regardless of how many Deny siblings it has.
+func TestEvaluate_S3Policy_MixedEffects_StillFires(t *testing.T) {
+	mixed := `{"Statement":[` +
+		`{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"*"},` +
+		`{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"*"}` +
+		`]}`
+	d := delta.Delta{
+		AddedNodes: []models.Node{
+			{
+				ID:           "aws_s3_bucket_policy.public_read",
+				Type:         "access_control",
+				ProviderType: "aws_s3_bucket_policy",
+				Attributes: map[string]any{
+					"public": false,
+					"policy": mixed,
+				},
+			},
+		},
+		Summary: delta.DeltaSummary{AddedNodes: 1},
+	}
+
+	r := Evaluate(d)
+
+	if !hasRuleID(r.Reasons, "s3_bucket_public_exposure") {
+		t.Fatal("PR2: a single Allow statement must keep s3_bucket_public_exposure firing")
+	}
+}
+
+// TestEvaluate_S3Policy_UnresolvedPolicy_StillFires preserves the v1.1
+// conservative default: when the parser could not resolve the `policy`
+// attribute (variable / heredoc-with-interpolation), the rule fires.
+// Design decision 14: never guess at unresolved expressions.
+func TestEvaluate_S3Policy_UnresolvedPolicy_StillFires(t *testing.T) {
+	d := delta.Delta{
+		AddedNodes: []models.Node{
+			{
+				ID:           "aws_s3_bucket_policy.dynamic",
+				Type:         "access_control",
+				ProviderType: "aws_s3_bucket_policy",
+				Attributes:   map[string]any{"public": false}, // no `policy` key at all
+			},
+		},
+		Summary: delta.DeltaSummary{AddedNodes: 1},
+	}
+
+	r := Evaluate(d)
+
+	if !hasRuleID(r.Reasons, "s3_bucket_public_exposure") {
+		t.Fatal("PR2: unresolved bucket policy must fire conservatively")
 	}
 }
 

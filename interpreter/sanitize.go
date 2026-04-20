@@ -24,6 +24,13 @@ type EgressPayload struct {
 	AddedEdges    []SanitizedEdge        `json:"added_edges"`
 	RemovedEdges  []SanitizedEdge        `json:"removed_edges"`
 	Summary       SanitizedSummary       `json:"summary"`
+
+	// SuppressedCount is the total number of risk findings silenced by the
+	// active config (.architex.yml + inline directives). Phase 7 (v1.2 PR3)
+	// exposes the COUNT only -- never the rule IDs or resource IDs -- so
+	// procurement reviewers can see "this team uses suppressions" without
+	// the egress payload leaking which controls were silenced.
+	SuppressedCount int `json:"suppressed_count"`
 }
 
 // SanitizedNode never carries the original Terraform name. The ID is the
@@ -134,6 +141,7 @@ func Sanitize(rep Report, policy SanitizationPolicy) EgressPayload {
 			RemovedEdges: rep.Delta.Summary.RemovedEdges,
 			ChangedNodes: rep.Delta.Summary.ChangedNodes,
 		},
+		SuppressedCount: len(rep.Risk.Suppressed),
 	}
 }
 

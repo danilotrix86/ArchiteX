@@ -1,10 +1,15 @@
 // Package interpreter is Stage 4 of the ArchiteX pipeline. It turns a Delta
 // and a RiskResult into human-facing artifacts: a Mermaid delta diagram, a
-// plain-English summary, review-focus bullets, and a Markdown PR comment.
+// plain-English summary, review-focus bullets, a Markdown PR comment, and
+// a self-contained HTML report.
 //
-// The package is fully deterministic. The Interpreter interface exists as a
-// future seam for an LLM-backed implementation (Phase 6); the default
-// DeterministicInterpreter has no network or model dependencies.
+// The package is fully deterministic and template-based. There is no
+// inference, no model call, and no network dependency anywhere in the
+// rendering pipeline -- the same Delta + RiskResult produces byte-identical
+// output across runs and across machines. The Interpreter interface exists
+// purely as a clean seam for alternative deterministic renderers (custom
+// summary templates, alternative output formats, locale variants); any
+// implementation must remain deterministic-equivalent.
 package interpreter
 
 import (
@@ -26,11 +31,12 @@ type Report struct {
 	ReviewFocus []string        `json:"review_focus"`
 }
 
-// Interpreter is the seam where an LLM provider can later be slotted in.
-// Implementations must be deterministic-equivalent (same input -> same shape
-// of output) so that downstream artifacts remain reproducible. Production
-// trust-critical decisions never depend on this interface; it shapes
-// presentation only.
+// Interpreter is the seam where an alternative deterministic renderer can
+// be slotted in (custom summary templates, locale variants, alternative
+// output styles). Implementations must be deterministic-equivalent --
+// same input produces the same shape of output, every time -- so that
+// downstream artifacts remain reproducible. Production trust-critical
+// decisions never depend on this interface; it shapes presentation only.
 type Interpreter interface {
 	Summary(d delta.Delta, r risk.RiskResult) string
 	ReviewFocus(d delta.Delta, r risk.RiskResult) []string

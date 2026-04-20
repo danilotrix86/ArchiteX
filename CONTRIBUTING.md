@@ -11,7 +11,7 @@ benefits every user equally.
 ```bash
 git clone https://github.com/danilotrix86/ArchiteX.git
 cd ArchiteX
-go test ./...          # 68+ tests across 6 packages
+go test ./...          # ~150 tests across 9 packages
 go build -o architex . # produces the CLI binary
 ```
 
@@ -40,11 +40,18 @@ Open an Issue or Discussion before sending a PR for:
   must never import networking packages. This is the structural enforcement of
   the zero-exfiltration guarantee.
 - Anything that introduces **non-deterministic behavior** (randomness,
-  timestamp-dependent ordering, LLM calls in the trust surface).
-- Anything that adds **user-configurable rules, weights, or thresholds**.
-  This is planned but the design is not yet settled.
+  timestamp-dependent ordering, model inference, network-dependent
+  outputs). The whole pipeline is required to be byte-identical across
+  runs given the same input.
+- New built-in risk rules. The rule library is opinionated and small on
+  purpose; before adding one, open a Discussion describing the
+  Terraform pattern, the abstract signal, and why it can't be expressed
+  as a `.architex.yml` override or an inline suppression on an existing
+  rule.
 - Changes to the **egress schema** (`docs/egress-schema.json`). The schema is
   a procurement-facing contract; changes must be backward-compatible.
+- Changes to the **`.architex.yml` schema** or the `.architex/baseline.json`
+  format. Both are user-facing contracts that ship in customer repos.
 
 ## Decision principles
 

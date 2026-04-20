@@ -25,7 +25,7 @@ func TestWriteAudit_ProducesExpectedFileSet(t *testing.T) {
 		t.Fatalf("WriteAudit: %v", err)
 	}
 
-	wantFiles := []string{"diagram.mmd", "summary.md", "score.json", "egress.json", "manifest.json"}
+	wantFiles := []string{"diagram.mmd", "summary.md", "score.json", "egress.json", "report.html", "manifest.json"}
 	for _, name := range wantFiles {
 		path := filepath.Join(bundle.Path, name)
 		if _, err := os.Stat(path); err != nil {

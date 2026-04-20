@@ -10,7 +10,7 @@ import (
 
 // stubInterpreter implements Interpreter with constant outputs, used to verify
 // that Render delegates Summary and ReviewFocus to the interface implementation
-// (so a future LLM-backed Interpreter can plug in without code changes).
+// (so an alternative deterministic Interpreter can plug in without code changes).
 type stubInterpreter struct {
 	summary string
 	focus   []string

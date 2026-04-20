@@ -40,6 +40,25 @@ var edgeTypeMap = map[string]string{
 	// Networking: an internet gateway is "part_of" its VPC, mirroring the
 	// existing aws_subnet|aws_vpc relationship.
 	"aws_internet_gateway|aws_vpc": "part_of",
+
+	// v1.2 -- Phase 7 PR4 (Coverage tranche 2). Same labelling philosophy
+	// as v1.1: prefer specific terms ("part_of", "applies_to",
+	// "deployed_in", "attached_to") only when the relationship has a
+	// stronger architectural meaning than the generic "references".
+	"aws_route53_record|aws_route53_zone":            "part_of",
+	"aws_kms_alias|aws_kms_key":                      "applies_to",
+	"aws_sns_topic_policy|aws_sns_topic":             "applies_to",
+	"aws_sqs_queue_policy|aws_sqs_queue":             "applies_to",
+	"aws_nat_gateway|aws_subnet":                     "deployed_in",
+	"aws_network_acl|aws_vpc":                        "part_of",
+	"aws_network_acl|aws_subnet":                     "applies_to",
+	"aws_network_acl_rule|aws_network_acl":           "applies_to",
+	"aws_ecs_service|aws_ecs_cluster":                "deployed_in",
+	"aws_ecs_service|aws_ecs_task_definition":        "uses",
+	"aws_ecs_service|aws_lb":                         "attached_to",
+	"aws_ecs_task_definition|aws_iam_role":           "attached_to",
+	"aws_cloudfront_distribution|aws_lb":             "attached_to",
+	"aws_cloudfront_distribution|aws_s3_bucket":      "attached_to",
 }
 
 // Build constructs a Graph from parsed resources and accumulated warnings.
@@ -108,10 +127,24 @@ func deriveAttributes(res models.RawResource) map[string]any {
 	// internet-facing surface. Marking these public:true at the node level
 	// lets the existing `new_entry_point` rule (Phase 3) and reviewer-focus
 	// templates (Phase 4) work for them with no rule changes.
+	//
+	// Phase 7 PR4 adds `aws_cloudfront_distribution`: every CF distro is
+	// internet-facing by definition (the whole point is CDN edge nodes
+	// with public DNS), so it counts as a new entry point on add.
 	case "aws_lambda_function_url",
 		"aws_apigatewayv2_api",
-		"aws_internet_gateway":
+		"aws_internet_gateway",
+		"aws_cloudfront_distribution":
 		attrs["public"] = true
+		if res.Type == "aws_cloudfront_distribution" {
+			// Pass `web_acl_id` through when literal so the
+			// cloudfront_no_waf rule can read it without re-parsing.
+			if v, ok := res.Attributes["web_acl_id"]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					attrs["web_acl_id"] = s
+				}
+			}
+		}
 
 	// Phase 6: IAM role-policy attachment. We pass `policy_arn` through to
 	// the graph node when (and only when) it was captured as a literal
@@ -124,6 +157,66 @@ func deriveAttributes(res models.RawResource) map[string]any {
 		if v, ok := res.Attributes["policy_arn"]; ok {
 			if s, ok := v.(string); ok && s != "" {
 				attrs["policy_arn"] = s
+			}
+		}
+
+	// Phase 7 (v1.2 PR2): pass the resolved `policy` JSON literal through
+	// to the graph node so the s3_bucket_public_exposure rule can inspect
+	// `Statement[].Effect`. The parser resolves `policy = jsonencode({...})`
+	// when the inner value is a literal (minimalEvalContext registers
+	// jsonencode). Variable-driven policies land here as nil and are
+	// intentionally NOT promoted -- the rule then conservatively fires
+	// (we never guess at unresolved expressions).
+	case "aws_s3_bucket_policy":
+		attrs["public"] = false
+		if v, ok := res.Attributes["policy"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				attrs["policy"] = s
+			}
+		}
+
+	// Phase 7 PR4: SNS/SQS topic/queue policies. Same passthrough pattern
+	// as `aws_s3_bucket_policy`: literal `policy` JSON is exposed so the
+	// messaging_topic_public rule can inspect Statement[].Effect /
+	// Statement[].Principal without re-parsing. Variable-driven policies
+	// stay nil; the rule then conservatively fires.
+	case "aws_sns_topic_policy", "aws_sqs_queue_policy":
+		attrs["public"] = false
+		if v, ok := res.Attributes["policy"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				attrs["policy"] = s
+			}
+		}
+
+	// Phase 7 PR4: EBS volume encryption. Pass `encrypted` through when
+	// it was a literal bool. A missing attribute lands here as nil; the
+	// rule treats unresolved as "trust the user did the right thing"
+	// (no false positive on var.encrypted-style indirection). An
+	// explicit `encrypted = false` is the only thing that fires.
+	case "aws_ebs_volume":
+		attrs["public"] = false
+		if v, ok := res.Attributes["encrypted"]; ok {
+			if b, ok := v.(bool); ok {
+				attrs["encrypted"] = b
+			}
+		}
+
+	// Phase 7 PR4: NACL rules. The trio of (cidr_block, egress,
+	// rule_action) determines whether the rule opens the world inbound.
+	// Pass each attribute through only when literal so the
+	// nacl_allow_all_ingress rule has a clean view.
+	case "aws_network_acl_rule":
+		attrs["public"] = false
+		for _, k := range []string{"cidr_block", "rule_action"} {
+			if v, ok := res.Attributes[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					attrs[k] = s
+				}
+			}
+		}
+		if v, ok := res.Attributes["egress"]; ok {
+			if b, ok := v.(bool); ok {
+				attrs["egress"] = b
 			}
 		}
 

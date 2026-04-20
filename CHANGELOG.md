@@ -4,6 +4,229 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-20
+
+The "Depth & Configurability" release (Phase 7). Expands what the parser
+can resolve from literal Terraform constructs, doubles AWS resource
+coverage to 34 types, adds 7 new risk rules (4 from PR4 + 3 baseline
+anomaly rules from PR5), gives users a first-class way to customize and
+silence findings without forking the binary, ships a self-contained
+`report.html` in every audit bundle, and bumps the audit bundle layout
+to ToolVersion `0.5.0`.
+
+Backward compatible with v1.1: a repo with no `.architex.yml`, no inline
+`# architex:ignore=` directives, and no `.architex/baseline.json` MUST
+produce bit-identical output to a v1.1 run (locked by
+`TestEvaluateWith_NilConfig_BehavesAsV11`,
+`TestEvaluateWithBaseline_NilBaseline_NoFirstTimeReasons`, and the
+existing high-risk fixture regression tests).
+
+### Added (PR1 — parser depth)
+
+- Local `module` blocks (`source = "./..."` / `"../..."` / absolute) are
+  now expanded recursively. Resources from a sub-module are namespaced
+  `module.<name>.<original_id>` so they participate in the graph as
+  first-class nodes alongside top-level resources. Remote module sources
+  (registry, `git::`, `https://`, ...) intentionally stay warn-and-skip
+  to preserve the runner-local trust model.
+- `count = <int>` and `count = length([...])` now expand into N
+  independent `RawResource`s, suffixed `[0]`, `[1]`, ... `count = 0`
+  produces zero resources (not a warning).
+- `for_each = { ... }` and `for_each = toset([...])` with literal keys now
+  expand into one `RawResource` per key, suffixed `["<key>"]`. Variable-
+  driven `for_each` still warns and skips so we never invent resources.
+- `dynamic "block" { for_each = [...] }` blocks with literal iterators now
+  materialize the inner block per iteration before attribute extraction.
+- `maxModuleDepth = 8` guards against accidental module cycles.
+
+### Added (PR2 — fix v1.1 caveats)
+
+- The parser now resolves `policy = jsonencode({ ... })` for
+  `aws_s3_bucket_policy` to a literal JSON string and forwards it to the
+  graph. The `s3_bucket_public_exposure` rule parses that string and is
+  suppressed when **every** statement has `Effect = "Deny"` -- eliminating
+  the v1.1 false-positive on strict bucket-lockdown policies.
+- The parser pre-scans each directory for `data "aws_iam_policy" "name" {
+  arn = "<literal>" }` blocks and uses them to resolve
+  `policy_arn = data.aws_iam_policy.name.arn` references at extraction
+  time. The `iam_admin_policy_attached` rule now fires on this idiom too.
+
+### Added (PR3 — config + suppressions)
+
+- New optional `.architex.yml` repository config, loaded from the head
+  directory (the side asserting intent). Supported sections:
+  - `rules.<id>.weight` / `.enabled` -- per-rule overrides.
+  - `thresholds.warn` / `.fail` -- numeric severity cutoffs.
+  - `ignore.paths` -- `**/*.tf` glob patterns; matching files are skipped
+    by the parser before they enter the graph (applied to both base AND
+    head dirs for consistent diffs).
+  - `suppressions[]` -- `(rule, resource, reason, [expires])` tuples.
+    `resource` may end in `*` for prefix wildcards. `expires` accepts
+    RFC3339 or `YYYY-MM-DD`; expired entries still drop the rule but are
+    flagged in the audit footer so reviewers can refresh or remove them.
+- Inline `# architex:ignore=<rule_id> reason="<text>"` and
+  `// architex:ignore=...` directives on the line(s) immediately
+  preceding a `resource "type" "name" {` block synthesize equivalent
+  suppressions. Multiple stacked directives all attach to the next
+  resource. A non-comment, non-resource line clears the pending stack so
+  directives never accidentally drift to a later block.
+- New `risk.RiskReason.ResourceID` field, populated by every per-resource
+  rule, so suppressions can match `(rule_id, resource_id)` precisely.
+  Cross-resource rules (e.g. `potential_data_exposure`) leave it empty
+  and are intentionally NOT suppressible by tuple -- use
+  `rules.<id>.enabled: false` to silence those.
+- `risk.RiskResult.Suppressed` carries the silenced findings (with their
+  reason and source -- `config:.architex.yml` or
+  `inline:<file>:<line>`) so they remain auditable.
+- The PR comment now includes a **Suppressed Findings** section above the
+  sticky footer when any are present, with each entry showing the rule,
+  resource, reason, source, and an `(EXPIRED)` flag where applicable.
+  Repos with no suppressions render exactly as in v1.1.
+- The egress payload gains a single new field, `suppressed_count` (an
+  integer, never the rule IDs or resource IDs). The published JSON
+  schema in `docs/egress-schema.json` is updated to match;
+  `TestEgressPayload_SchemaParity` enforces it.
+- New `risk.EvaluateWith(d, cfg, now)` is the configurable entry point;
+  `risk.Evaluate(d)` is now a thin wrapper that calls
+  `EvaluateWith(d, nil, time.Time{})` and remains bit-identical to v1.1.
+- New `parser.ParseDirWith(dir, cfg)` is the configurable parser entry;
+  `parser.ParseDir(dir)` keeps the v1.0/v1.1 zero-config signature.
+
+### Added (PR4 — AWS coverage tranche 2 + 4 new risk rules)
+
+- 17 additional first-class AWS resource types, mapped to existing abstract
+  types so the Mermaid diagram, edge ranking, and confidence math need no
+  schema migration:
+  - **Entry:** `aws_cloudfront_distribution`
+  - **Network:** `aws_route53_zone`, `aws_route53_record`, `aws_nat_gateway`
+  - **Identity:** `aws_kms_key`, `aws_kms_alias`
+  - **Data:** `aws_sns_topic`, `aws_sqs_queue`, `aws_secretsmanager_secret`
+  - **Access control:** `aws_sns_topic_policy`, `aws_sqs_queue_policy`,
+    `aws_network_acl`, `aws_network_acl_rule`
+  - **Storage:** `aws_ebs_volume`
+  - **Compute:** `aws_ecs_cluster`, `aws_ecs_task_definition`,
+    `aws_ecs_service`
+- 10 new explicit edge relationships between tranche-2 resources, e.g.
+  `aws_route53_record -> aws_route53_zone` (`part_of`),
+  `aws_kms_alias -> aws_kms_key` (`applies_to`),
+  `aws_sns_topic_policy -> aws_sns_topic` (`applies_to`),
+  `aws_nat_gateway -> aws_subnet` (`deployed_in`),
+  `aws_network_acl -> aws_vpc` (`part_of`),
+  `aws_ecs_service -> aws_ecs_cluster` (`deployed_in`),
+  `aws_ecs_service -> aws_ecs_task_definition` (`uses`).
+- The graph now passes through additional literal attributes that the new
+  rules need to fire deterministically without re-parsing HCL:
+  `web_acl_id` for CloudFront, `encrypted` for EBS, `policy` for both
+  SNS/SQS topic policies, and `cidr_block` / `egress` / `rule_action` for
+  NACL rules. Variable-driven values stay `nil` so rules conservatively
+  do NOT fire on unresolved expressions.
+- Four new deterministic risk rules:
+  - **`cloudfront_no_waf`** (2.5): triggers per added
+    `aws_cloudfront_distribution` with no literal `web_acl_id`.
+    Variable-driven `web_acl_id` is intentionally treated as absent so a
+    distribution that ships with no statically-provable WAF is flagged.
+  - **`ebs_volume_unencrypted`** (3.0): triggers per added `aws_ebs_volume`
+    with an explicit literal `encrypted = false`. Unset / variable-driven
+    `encrypted` does NOT fire (account default may be encryption-on).
+  - **`messaging_topic_public`** (3.5): triggers per added
+    `aws_sns_topic_policy` / `aws_sqs_queue_policy` whose resolved
+    `policy` JSON contains an `Effect = "Allow"` statement with
+    `Principal = "*"` (or `AWS: "*"`, including list form). Unresolvable
+    or non-JSON policies do not fire.
+  - **`nacl_allow_all_ingress`** (3.5): triggers per added
+    `aws_network_acl_rule` with `cidr_block = "0.0.0.0/0"`,
+    `egress = false`, AND `rule_action = "allow"`. All three must be
+    literal; missing any one leaves the rule silent.
+- Every new rule respects PR3's config + suppression machinery
+  (`rules.<id>.enabled`, `rules.<id>.weight`, per-resource suppressions,
+  inline `# architex:ignore=` directives) and emits at most 2 reasons per
+  evaluation so a single sweeping refactor cannot saturate the 10.0 cap.
+- New testdata fixtures:
+  - `testdata/tranche2_resources/` -- one Terraform module exercising
+    every new resource type, used as the parser-coverage contract test
+    (no `unsupported_resource` warnings, confidence 1.0).
+  - `testdata/tranche2_base/` + `testdata/tranche2_head/` -- end-to-end
+    fixture that triggers all four new rules from a single base->head
+    pair (plus the existing `new_entry_point` on the new CloudFront).
+
+### Added (PR5 — baseline anomaly rules + `architex baseline` subcommand)
+
+- New `baseline` package persists a deterministic snapshot of an
+  architecture graph's "shape" -- the sets of provider resource types,
+  abstract types, and (sourceProviderType, targetProviderType) edge pairs
+  ever observed. The on-disk representation is a small, human-auditable
+  JSON file (`schema_version: "1"`, default path `.architex/baseline.json`)
+  that contains NO raw HCL, NO resource names, and NO attribute values --
+  only the *kinds* of things already present, so it can be checked into a
+  public repo without leaking architectural detail beyond what
+  `models.SupportedResources` and `models.AbstractionMap` already publish.
+- New `architex baseline <dir> [--out <path>] [--merge]` subcommand
+  generates (or, with `--merge`, unions into) a baseline file from the
+  current graph of `<dir>`. Atomic write (temp file + rename) so a
+  crashed run never leaves a half-written baseline that would silently
+  disable rules on the next PR.
+- Three new deterministic anomaly rules, all silenced when no baseline
+  is present (the v1.1 zero-config behavior is bit-identical):
+  - **`first_time_resource_type`** (1.0): triggers on each added node
+    whose `provider_type` (e.g. `aws_kms_key`) has never appeared in the
+    baseline. Deduped per type and capped at 2 reasons per evaluation,
+    so a multi-instance module rollout cannot saturate the score.
+  - **`first_time_abstract_type`** (1.5): triggers on each added node
+    whose abstract type (e.g. `entry_point`, `identity`) has never
+    appeared in the baseline. Same dedup + 2-cap. The strongest signal
+    of the three -- a brand-new architectural category usually marks a
+    real inflection point.
+  - **`first_time_edge_pair`** (0.5): triggers per added edge whose
+    `(sourceProviderType, targetProviderType)` pair is unknown to the
+    baseline. Both endpoints must be resolvable from the delta's added
+    or changed nodes -- unresolvable endpoints conservatively skip
+    (never guess).
+- New `risk.EvaluateWithBaseline(d, cfg, base, now)` is the canonical
+  entry point that runs the full v1.0 + v1.1 + PR4 + PR5 rule set.
+  `risk.EvaluateWith(d, cfg, now)` is now a thin wrapper that passes a
+  `nil` baseline; `risk.Evaluate(d)` continues to pass `nil, nil`. All
+  three preserve their pre-PR5 contracts.
+- Suppressions and rule overrides from PR3 work unchanged on the new
+  rules: `rules.first_time_*.enabled: false` silences a category, and
+  `(rule, resource)` suppressions work because every reason populates
+  `ResourceID`. Suppressed novel findings still surface in the audit
+  footer so reviewers see what was filtered.
+- `score`, `report`, and `sanitize` subcommands now auto-load
+  `<head-dir>/.architex/baseline.json` when present and forward it to
+  `EvaluateWithBaseline`. A malformed baseline degrades to "no baseline"
+  with a stderr warning -- a typo in the file can never brick CI.
+
+### Added (PR6 — self-contained `report.html` in audit bundle)
+
+- New `report.html` artifact written to every audit bundle alongside
+  `diagram.mmd`, `summary.md`, `score.json`, `egress.json`, and
+  `manifest.json`. The page is a single self-contained file with NO
+  JavaScript, NO external CDN scripts, NO remote stylesheets, and NO
+  remote fonts/images -- just inlined CSS using system fonts. A
+  reviewer can open it in an air-gapped browser and see the entire
+  report (severity badges, score, summary, review focus, reasons table,
+  suppressed findings, delta counts, and Mermaid source).
+- Optional Mermaid Live Editor deep link: when the diagram is under
+  8 KiB, the page renders a single `<a href>` to
+  `https://mermaid.live/edit#base64:<envelope>`. The link is the ONLY
+  outbound URL in the file and only fires on a user click -- the page
+  itself never makes a network request at render time. This is gated
+  by a regex test (`TestFormatHTML_SelfContained_NoExternalResources`)
+  that fails the build if a `<script>`, `<link rel="stylesheet">`,
+  `<img>`, `<iframe>`, `<embed>`, `<object>`, or any non-`href`-bound
+  http(s) URL is ever introduced.
+- New exported `interpreter.FormatHTML(rep, manifest)` function so
+  third-party tooling can render the same page outside of the audit
+  bundle pipeline (pass `Manifest{}` for a single-shot render).
+- The HTML page surfaces the `Manifest.Files` SHA-256 table, so a
+  reviewer reading `report.html` alone can verify the sibling artifacts
+  in the bundle have not been tampered with after generation. The HTML
+  itself is intentionally NOT in `Manifest.Files` -- a manifest cannot
+  contain a checksum of a page that itself displays the checksums.
+- Output is fully deterministic: the same `Report` + `Manifest` produce
+  byte-identical bytes, locked by
+  `TestFormatHTML_Deterministic_SameInputSameOutput`.
+
 ## [1.1.0] - 2026-04-19
 
 The "AWS Top 10" release. Adds 10 new resource types, two new abstract types,

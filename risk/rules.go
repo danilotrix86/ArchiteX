@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -25,10 +26,11 @@ func evaluatePublicExposure(d delta.Delta) []RiskReason {
 		}
 		if !before && after {
 			reasons = append(reasons, RiskReason{
-				RuleID:  "public_exposure_introduced",
-				Message: fmt.Sprintf("Resource %s became publicly accessible.", cn.ID),
-				Impact:  "exposure",
-				Weight:  4.0,
+				RuleID:     "public_exposure_introduced",
+				Message:    fmt.Sprintf("Resource %s became publicly accessible.", cn.ID),
+				Impact:     "exposure",
+				Weight:     4.0,
+				ResourceID: cn.ID,
 			})
 		}
 	}
@@ -42,10 +44,11 @@ func evaluateNewData(d delta.Delta) []RiskReason {
 	for _, n := range d.AddedNodes {
 		if n.Type == "data" {
 			reasons = append(reasons, RiskReason{
-				RuleID:  "new_data_resource",
-				Message: fmt.Sprintf("New data resource %s introduced.", n.ID),
-				Impact:  "data",
-				Weight:  2.5,
+				RuleID:     "new_data_resource",
+				Message:    fmt.Sprintf("New data resource %s introduced.", n.ID),
+				Impact:     "data",
+				Weight:     2.5,
+				ResourceID: n.ID,
 			})
 		}
 	}
@@ -59,10 +62,11 @@ func evaluateNewEntryPoint(d delta.Delta) []RiskReason {
 	for _, n := range d.AddedNodes {
 		if n.Type == "entry_point" {
 			reasons = append(reasons, RiskReason{
-				RuleID:  "new_entry_point",
-				Message: fmt.Sprintf("New public entry point %s introduced.", n.ID),
-				Impact:  "exposure",
-				Weight:  3.0,
+				RuleID:     "new_entry_point",
+				Message:    fmt.Sprintf("New public entry point %s introduced.", n.ID),
+				Impact:     "exposure",
+				Weight:     3.0,
+				ResourceID: n.ID,
 			})
 		}
 	}
@@ -118,10 +122,11 @@ func evaluateRemoval(d delta.Delta) []RiskReason {
 			break
 		}
 		reasons = append(reasons, RiskReason{
-			RuleID:  "resource_removed",
-			Message: fmt.Sprintf("Resource %s was removed.", n.ID),
-			Impact:  "change",
-			Weight:  0.5,
+			RuleID:     "resource_removed",
+			Message:    fmt.Sprintf("Resource %s was removed.", n.ID),
+			Impact:     "change",
+			Weight:     0.5,
+			ResourceID: n.ID,
 		})
 	}
 	return reasons
@@ -131,9 +136,9 @@ func evaluateRemoval(d delta.Delta) []RiskReason {
 // Phase 6 (v1.1) — AWS Top 10 risk rules
 //
 // Each Phase 6 rule keys off a small, deterministic delta-level signal so
-// the engine stays free of cross-resource graph traversal. The trade-off is
-// documented in CHANGELOG.md and llm.md: per-resource signals are slightly
-// noisier than full graph reasoning but ship in days, not weeks.
+// the engine stays free of cross-resource graph traversal. The trade-off
+// is documented in CHANGELOG.md: per-resource signals are slightly noisier
+// than full graph reasoning but are far easier to audit and override.
 // ---------------------------------------------------------------------------
 
 // phase6CapPerRule bounds how many reasons any one Phase 6 rule may emit, so
@@ -142,7 +147,7 @@ func evaluateRemoval(d delta.Delta) []RiskReason {
 // sees 2 instances of the same finding will already understand the pattern.
 const phase6CapPerRule = 2
 
-// Rule 6 — S3 bucket public exposure (Phase 6).
+// Rule 6 — S3 bucket public exposure (Phase 6, refined Phase 7).
 //
 // Per-resource signal model:
 //   - REMOVING an aws_s3_bucket_public_access_block weakens the bucket's
@@ -155,9 +160,13 @@ const phase6CapPerRule = 2
 // names the access-control resource itself, which the reviewer can map to
 // its bucket trivially in the diagram.
 //
-// False-positive caveat (documented in CHANGELOG): adding a strict
-// bucket policy that DENIES public access will also trigger this rule.
-// Reviewers can dismiss in the PR thread; we will refine in v1.2.
+// Phase 7 (v1.2 PR2): when the parser resolved the bucket policy JSON
+// literal (because `policy = jsonencode({...})` is evaluable without an
+// eval context), this rule now inspects `Statement[].Effect`. If EVERY
+// statement is "Deny" the policy cannot grant public access and the
+// finding is suppressed. This eliminates the documented v1.1 false
+// positive on strict-deny policies. Variable-driven policies still land
+// here as nil and continue to fire conservatively (no guessing).
 func evaluateS3BucketPublicExposure(d delta.Delta) []RiskReason {
 	var reasons []RiskReason
 
@@ -166,10 +175,11 @@ func evaluateS3BucketPublicExposure(d delta.Delta) []RiskReason {
 			return
 		}
 		reasons = append(reasons, RiskReason{
-			RuleID:  "s3_bucket_public_exposure",
-			Message: fmt.Sprintf(ruleMessage, sourceID),
-			Impact:  "exposure",
-			Weight:  4.0,
+			RuleID:     "s3_bucket_public_exposure",
+			Message:    fmt.Sprintf(ruleMessage, sourceID),
+			Impact:     "exposure",
+			Weight:     4.0,
+			ResourceID: sourceID,
 		})
 	}
 
@@ -179,12 +189,51 @@ func evaluateS3BucketPublicExposure(d delta.Delta) []RiskReason {
 		}
 	}
 	for _, n := range d.AddedNodes {
-		if n.ProviderType == "aws_s3_bucket_policy" {
-			emit("S3 bucket policy %s was added; review for public principal grants.", n.ID)
+		if n.ProviderType != "aws_s3_bucket_policy" {
+			continue
 		}
+		if isDenyOnlyBucketPolicy(n.Attributes) {
+			// Phase 7 PR2: deny-only policies cannot introduce public
+			// exposure. Skip silently -- the policy is still visible in
+			// the diagram and audit bundle.
+			continue
+		}
+		emit("S3 bucket policy %s was added; review for public principal grants.", n.ID)
 	}
 
 	return reasons
+}
+
+// isDenyOnlyBucketPolicy returns true iff the resource's attributes carry a
+// resolved `policy` JSON string AND that policy contains a non-empty
+// Statement list whose every entry has Effect == "Deny" (case-insensitive).
+//
+// Anything that fails to parse, lacks a `policy` literal, has zero
+// statements, or contains any non-Deny effect returns false -- which makes
+// the rule fire conservatively. This preserves design decision 14
+// ("never guess at unresolved expressions").
+func isDenyOnlyBucketPolicy(attrs map[string]any) bool {
+	raw, ok := attrs["policy"].(string)
+	if !ok || raw == "" {
+		return false
+	}
+	var doc struct {
+		Statement []struct {
+			Effect string `json:"Effect"`
+		} `json:"Statement"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return false
+	}
+	if len(doc.Statement) == 0 {
+		return false
+	}
+	for _, st := range doc.Statement {
+		if !strings.EqualFold(st.Effect, "Deny") {
+			return false
+		}
+	}
+	return true
 }
 
 // adminPolicyARNSuffixes lists the AWS-managed policy ARNs whose attachment
@@ -233,10 +282,11 @@ func evaluateIAMAdminAttached(d delta.Delta) []RiskReason {
 			break
 		}
 		reasons = append(reasons, RiskReason{
-			RuleID:  "iam_admin_policy_attached",
-			Message: fmt.Sprintf("IAM attachment %s grants %s; review for privilege escalation.", n.ID, matchedSuffix),
-			Impact:  "identity",
-			Weight:  3.5,
+			RuleID:     "iam_admin_policy_attached",
+			Message:    fmt.Sprintf("IAM attachment %s grants %s; review for privilege escalation.", n.ID, matchedSuffix),
+			Impact:     "identity",
+			Weight:     3.5,
+			ResourceID: n.ID,
 		})
 	}
 
@@ -260,10 +310,11 @@ func evaluateLambdaPublicURL(d delta.Delta) []RiskReason {
 			break
 		}
 		reasons = append(reasons, RiskReason{
-			RuleID:  "lambda_public_url_introduced",
-			Message: fmt.Sprintf("Public Lambda function URL %s was introduced; verify auth type and WAF coverage.", n.ID),
-			Impact:  "exposure",
-			Weight:  3.0,
+			RuleID:     "lambda_public_url_introduced",
+			Message:    fmt.Sprintf("Public Lambda function URL %s was introduced; verify auth type and WAF coverage.", n.ID),
+			Impact:     "exposure",
+			Weight:     3.0,
+			ResourceID: n.ID,
 		})
 	}
 	return reasons

@@ -211,10 +211,14 @@ func warningCategories(warnings []models.Warning) []string {
 	return cats
 }
 
-func TestParseDir_ForEachSkipped(t *testing.T) {
+// TestParseDir_ForEachUnresolvableSkipped verifies that for_each over an
+// unresolvable expression (a variable, in this case) still produces no
+// resources and an unsupported_construct warning -- the v1.0/v1.1 contract
+// is preserved for the case where Phase 7 cannot safely expand.
+func TestParseDir_ForEachUnresolvableSkipped(t *testing.T) {
 	tf := `
 resource "aws_instance" "multi" {
-  for_each      = toset(["a", "b"])
+  for_each      = var.targets
   ami           = "ami-abc123"
   instance_type = "t3.micro"
 }
@@ -225,17 +229,20 @@ resource "aws_instance" "multi" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(resources) != 0 {
-		t.Errorf("expected 0 resources (for_each should be skipped), got %d", len(resources))
+		t.Errorf("expected 0 resources (var.targets is unresolvable), got %d", len(resources))
 	}
-	if len(warnings) == 0 {
-		t.Error("expected warning for for_each usage")
+	if !warningsHaveCategory(warnings, models.WarnUnsupportedConstruct) {
+		t.Error("expected unsupported_construct warning for non-literal for_each")
 	}
 }
 
-func TestParseDir_ModuleWarning(t *testing.T) {
+// TestParseDir_RemoteModuleWarning verifies that remote module sources are
+// NOT fetched (we never introduce a new outbound network surface) and emit
+// an unsupported_construct warning instead.
+func TestParseDir_RemoteModuleWarning(t *testing.T) {
 	tf := `
 module "vpc" {
-  source = "./modules/vpc"
+  source = "terraform-aws-modules/vpc/aws"
 }
 `
 	dir := writeTempTF(t, tf)
@@ -244,10 +251,10 @@ module "vpc" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(resources) != 0 {
-		t.Errorf("expected 0 resources, got %d", len(resources))
+		t.Errorf("expected 0 resources for remote module, got %d", len(resources))
 	}
-	if !warningsContain(warnings, "module") {
-		t.Error("expected warning about module block")
+	if !warningsContain(warnings, "remote source") {
+		t.Errorf("expected warning about remote source; got %v", warnings)
 	}
 }
 
@@ -284,6 +291,97 @@ func TestParseDir_Phase6Resources_AllRecognized(t *testing.T) {
 		if findResource(resources, id) == nil {
 			t.Errorf("Phase 6 resource %s was not parsed", id)
 		}
+	}
+}
+
+// TestParseDir_Tranche2Resources_AllRecognized verifies that every Phase 7
+// PR4 (v1.2 "Coverage tranche 2") resource type is recognized by the parser
+// without emitting `unsupported_resource` warnings. Mirrors the equivalent
+// Phase 6 test above.
+func TestParseDir_Tranche2Resources_AllRecognized(t *testing.T) {
+	resources, warnings, err := ParseDir("../testdata/tranche2_resources")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if w.Category == models.WarnUnsupportedResource {
+			t.Errorf("unexpected unsupported_resource warning: %s", w.Message)
+		}
+	}
+
+	expected := []string{
+		"aws_cloudfront_distribution.web",
+		"aws_route53_zone.main",
+		"aws_route53_record.www",
+		"aws_kms_key.main",
+		"aws_kms_alias.main",
+		"aws_sns_topic.alerts",
+		"aws_sns_topic_policy.alerts",
+		"aws_sqs_queue.jobs",
+		"aws_sqs_queue_policy.jobs",
+		"aws_nat_gateway.main",
+		"aws_network_acl.main",
+		"aws_network_acl_rule.open_inbound",
+		"aws_secretsmanager_secret.db",
+		"aws_ebs_volume.data",
+		"aws_ecs_cluster.main",
+		"aws_ecs_task_definition.app",
+		"aws_ecs_service.app",
+	}
+	for _, id := range expected {
+		if findResource(resources, id) == nil {
+			t.Errorf("tranche-2 resource %s was not parsed", id)
+		}
+	}
+}
+
+// TestParseDir_Tranche2_LiteralAttributesPromoted spot-checks that the four
+// new rules' input attributes survive the parser round-trip:
+//   - aws_ebs_volume.encrypted (bool literal)
+//   - aws_network_acl_rule.{cidr_block, egress, rule_action} (mixed literals)
+//   - aws_sns_topic_policy.policy (jsonencode -> JSON string)
+//
+// The aws_cloudfront_distribution.web_acl_id literal is exercised end-to-end
+// by the cloudfront_no_waf rule tests in risk/rules_v12_test.go.
+func TestParseDir_Tranche2_LiteralAttributesPromoted(t *testing.T) {
+	resources, _, err := ParseDir("../testdata/tranche2_resources")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ebs := findResource(resources, "aws_ebs_volume.data")
+	if ebs == nil {
+		t.Fatal("aws_ebs_volume.data not parsed")
+	}
+	if got, ok := ebs.Attributes["encrypted"].(bool); !ok || got {
+		t.Errorf("expected encrypted=false (bool), got %v (%T)", ebs.Attributes["encrypted"], ebs.Attributes["encrypted"])
+	}
+
+	nacl := findResource(resources, "aws_network_acl_rule.open_inbound")
+	if nacl == nil {
+		t.Fatal("aws_network_acl_rule.open_inbound not parsed")
+	}
+	if got, _ := nacl.Attributes["cidr_block"].(string); got != "0.0.0.0/0" {
+		t.Errorf("expected cidr_block=0.0.0.0/0, got %v", nacl.Attributes["cidr_block"])
+	}
+	if got, _ := nacl.Attributes["rule_action"].(string); got != "allow" {
+		t.Errorf("expected rule_action=allow, got %v", nacl.Attributes["rule_action"])
+	}
+	if got, ok := nacl.Attributes["egress"].(bool); !ok || got {
+		t.Errorf("expected egress=false (bool), got %v (%T)", nacl.Attributes["egress"], nacl.Attributes["egress"])
+	}
+
+	pol := findResource(resources, "aws_sns_topic_policy.alerts")
+	if pol == nil {
+		t.Fatal("aws_sns_topic_policy.alerts not parsed")
+	}
+	raw, ok := pol.Attributes["policy"].(string)
+	if !ok || raw == "" {
+		t.Fatalf("expected jsonencode-resolved policy string, got %v", pol.Attributes["policy"])
+	}
+	if !strings.Contains(raw, `"Effect":"Allow"`) || !strings.Contains(raw, `"Principal":"*"`) {
+		t.Errorf("policy JSON missing expected fragments, got: %s", raw)
 	}
 }
 

@@ -22,6 +22,11 @@ Thumbs.db
 .architex/
 tmp_audit/
 
+# Real-world validation harness output (`scripts/validate-real-world.ps1`)
+# Contains shallow clones of upstream Terraform repos plus per-run logs;
+# runs to GiB-scale on a full top-50 sweep, never appropriate to commit.
+.validation-runs/
+
 # Internal dev notes (intentionally not published)
 # llm.md is the maintainer's onboarding/context journal -- it documents
 # weak spots, design trade-offs, and not-yet-built work that aren't
