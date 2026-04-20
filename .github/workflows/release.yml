@@ -1,5 +1,16 @@
 name: Release
 
+# v1.3 PR6 -- prebuilt binaries via goreleaser.
+#
+# Tagging `vX.Y.Z` (e.g. `git tag v1.3.0 && git push origin v1.3.0`)
+# triggers this workflow which:
+#   1. validates formatting + vet + tests on the tagged commit;
+#   2. cross-compiles linux/darwin/windows on amd64+arm64 (skipping
+#      windows/arm64 -- see .goreleaser.yaml);
+#   3. attaches the archives + checksums.txt to the GitHub release page;
+#   4. uses CHANGELOG.md as the release body so users always see the
+#      hand-curated, version-by-version notes.
+
 on:
   push:
     tags:
@@ -9,8 +20,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Validate and publish release
+  validate:
+    name: Validate tagged commit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,8 +47,28 @@ jobs:
       - name: Test
         run: go test ./... -count=1
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Build prebuilt binaries and publish release
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          generate_release_notes: true
-          body_path: CHANGELOG.md
+          # goreleaser needs the full history to derive {{ .Commit }} /
+          # version metadata correctly.
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
