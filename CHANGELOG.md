@@ -4,6 +4,148 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-20
+
+The "Launch" release (Phase 8). Closes the highest-leverage coverage gap
+from the v1.2 real-world validation sweep (EKS, Auto Scaling, RDS
+auxiliary groups), introduces a new parser mode purpose-built for
+module-author repos, ships an examples gallery wired into CI, an
+auto-deployed GitHub Pages site with a live sample report, prebuilt
+binaries for every release, and a complete launch kit.
+
+Backward compatible with v1.2: a repo with no `parser.mode: library` in
+its `.architex.yml` and no Tranche-3 resources MUST produce bit-identical
+output to a v1.2 run. The default `parser.mode` is `consumer` (the v1.2
+behavior).
+
+### Added (PR1 — coverage tranche 3)
+
+- Eleven new AWS resource types (45 total):
+  - **EKS family** — `aws_eks_cluster`, `aws_eks_node_group`,
+    `aws_eks_addon`, `aws_eks_fargate_profile`,
+    `aws_eks_identity_provider_config`. Closes the #1 missing resource
+    cluster from the v1.2 real-world validation sweep
+    (`docs/v1.2-validation-findings.md`).
+  - **EC2 Auto Scaling family** — `aws_launch_template`,
+    `aws_autoscaling_group`, `aws_autoscaling_policy`. Covers the modern
+    EC2 substrate (any non-trivial fleet uses these).
+  - **RDS auxiliary groups** — `aws_db_subnet_group`,
+    `aws_db_parameter_group`, `aws_db_option_group`. Closes the
+    persistent-data gap.
+- Three new risk rules (18 total):
+  - `eks_public_endpoint` (weight 3.5) — fires when an added
+    `aws_eks_cluster` has `vpc_config.endpoint_public_access = true` AND
+    no `vpc_config.endpoint_public_access_cidrs` allow-list. Equal weight
+    to `iam_admin_policy_attached` — a public EKS API surface without a
+    CIDR allow-list is a textbook ransomware foothold.
+  - `eks_no_logging` (weight 1.5) — fires when an added
+    `aws_eks_cluster` has no `enabled_cluster_log_types`. Hygiene
+    finding; stacks with `eks_public_endpoint` to 5.0 (medium tier).
+  - `asg_unrestricted_scaling` (weight 1.0) — fires when an added
+    `aws_autoscaling_group` has literal `max_size > 100` AND no
+    `min_size` floor. Runaway-cost / stampede primitive.
+- New edge types: `part_of` (EKS node groups → cluster),
+  `attached_to` / `deployed_in` / `applies_to` for the EKS, ASG, and
+  RDS-aux family relationships.
+- Tranche-3 selftest fixtures (`testdata/tranche3_base`,
+  `testdata/tranche3_head`) wired into the GitHub Actions workflow as
+  regression checks.
+
+### Added (PR2 — library-mode parsing)
+
+- New `parser.mode: library` setting in `.architex.yml`. Default
+  remains `consumer` (the v1.2 behavior). Library mode is built for
+  module-author repos where every resource is wrapped in
+  `count = var.create ? 1 : 0`.
+- The parser now recognizes the canonical "create-or-not" gate shapes:
+  - `count = var.<name> ? <int> : <int>`
+  - `count = local.<name> ? <int> : <int>`
+  - `count = length(var.<name>) > 0 ? <int> : <int>`
+- For each gate it materializes ONE phantom resource marked
+  `Attributes["conditional"] = true`. Anything else (raw
+  `count = var.replicas`, resource-driven gates, etc.) continues to
+  warn-and-skip — the engine never invents resources from values it
+  cannot resolve.
+- Risk rules MUST refuse to score conditional phantoms. The
+  `isConditionalNode` helper in `risk/rules_v13.go` is the single source
+  of truth; all per-resource rules in `risk/rules.go`,
+  `risk/rules_v12.go`, and `risk/rules_v13.go` consult it before firing.
+- Mermaid diagrams render conditional phantoms with a leading `?`
+  (e.g. `+ ? compute: aws_eks_cluster.control`) so reviewers can never
+  confuse a phantom with a definite resource.
+- New `testdata/library_mode_*` fixtures and selftest assertions:
+  the diagram MUST contain the phantom and the score.json MUST NOT
+  contain the rule that would have fired on a definite resource.
+
+### Added (PR3 — marketing-grade README)
+
+- Full README rebuild with hero section, comparison table vs.
+  tfsec / Checkov / Terraform Cloud, "how it works" Mermaid diagram,
+  v1.3 highlights, and a polished examples-gallery section.
+- Suggested review focus messages now exist for every rule
+  (`interpreter/summary.go`); the previous behavior of falling back to
+  "No risk rules triggered" when only post-v1.0 rules fired is fixed.
+
+### Added (PR4 — examples gallery)
+
+- New `examples/` directory with six reviewer-grade scenarios:
+  1. `01-public-alb` — canonical exposure, score 9.0 / high.
+  2. `02-eks-public-endpoint` — EKS open API + no logging, score 5.0.
+  3. `03-iam-admin-attachment` — `AdministratorAccess` attached, 3.5.
+  4. `04-cloudfront-no-waf` — CloudFront with no WAF, 5.5.
+  5. `05-library-mode` — module-author phantoms; 0.0, no rules fire.
+  6. `06-lambda-public-url` — public Lambda URL, 6.0.
+- Each example carries a `README.md` describing the scenario and
+  expected output, plus a full `base/` and `head/` snapshot.
+- The selftest workflow runs `architex report` against every example
+  and asserts both the exact score and the must-fire / must-not-fire
+  rule sets — anything that silently changes rendered output fails CI.
+
+### Added (PR5 — GitHub Pages site)
+
+- New zero-build landing page at `docs/site/index.html`. Self-contained
+  HTML/CSS, no JavaScript, no remote fonts.
+- New `.github/workflows/pages.yml` deploys the site to GitHub Pages on
+  every push to `main`, embedding a freshly-rendered sample
+  `report.html` from `examples/01-public-alb` so visitors can see what
+  the report looks like without installing anything.
+
+### Added (PR6 — prebuilt binaries via goreleaser)
+
+- New `.goreleaser.yaml` cross-compiles the CLI for
+  linux/darwin/windows on amd64+arm64 (skipping windows-arm64 which is
+  not a primary target).
+- Release workflow updated to invoke goreleaser. Each tagged release
+  now ships archives + `checksums.txt` (SHA-256) attached to the
+  GitHub release page.
+- New `--version` / `version` subcommand on the CLI. The
+  `version`, `commit`, and `date` ldflags are populated by goreleaser at
+  build time; `dev` / `none` / `unknown` for `go build` callers.
+
+### Added (PR7 — announcement post)
+
+- New `docs/v1.3-announcement.md` — long-form release announcement that
+  doubles as the seed for the GitHub Discussions launch post and any
+  external write-up.
+
+### Changed
+
+- `interpreter/summary.go`: every rule that ships in v1.0 / v1.1 / v1.2 /
+  v1.3 now has a dedicated review-focus message. The previous behavior
+  silently fell back to the generic "No risk rules triggered" message
+  for any rule that wasn't on the v1.0 hand-curated list.
+- All per-resource risk rules in `risk/rules.go`, `risk/rules_v12.go`,
+  and `risk/rules_v13.go` now consult `isConditionalNode` and silently
+  refuse to score conditional phantoms. This is the load-bearing
+  contract that makes library mode safe.
+
+### Coverage
+
+- 45 AWS resource types (was 34).
+- 18 deterministic risk rules (was 15).
+- 6 reviewer-grade examples (was 0; previously testdata was the only
+  source of truth).
+
 ## [1.2.0] - 2026-04-20
 
 The "Depth & Configurability" release (Phase 7). Expands what the parser
