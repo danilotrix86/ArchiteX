@@ -38,6 +38,83 @@ jobs:
           echo "Bundle: ${BUNDLE}"
           ls -la "${BUNDLE}"
 
+      - name: Tranche-3 selftest (EKS + ASG fixtures)
+        run: |
+          set -euo pipefail
+          mkdir -p .architex-tranche3
+          ./architex report ./testdata/tranche3_base ./testdata/tranche3_head --out ./.architex-tranche3 > /dev/null
+          BUNDLE="$(ls -td .architex-tranche3/*/ | head -1)"
+          SUMMARY="${BUNDLE}summary.md"
+          # The tranche-3 head fixture must trip every new v1.3 rule.
+          for RULE in eks_public_endpoint eks_no_logging asg_unrestricted_scaling; do
+            if ! grep -q "${RULE}" "${BUNDLE}score.json"; then
+              echo "::error file=${BUNDLE}score.json::missing expected v1.3 rule: ${RULE}"
+              exit 1
+            fi
+          done
+          echo "Tranche-3 selftest: all v1.3 rules fired as expected."
+
+      - name: Examples gallery regression (v1.3 PR4)
+        run: |
+          set -euo pipefail
+          mkdir -p .architex-examples
+          # Each example is (dir, expected score, must-fire rule, must-NOT-fire rule).
+          # An empty must-fire field means "no rules must fire" (library mode).
+          declare -a CASES=(
+            "01-public-alb|9.0|public_exposure_introduced|"
+            "02-eks-public-endpoint|5.0|eks_public_endpoint|"
+            "03-iam-admin-attachment|3.5|iam_admin_policy_attached|"
+            "04-cloudfront-no-waf|5.5|cloudfront_no_waf|"
+            "05-library-mode|0.0||eks_public_endpoint"
+            "06-lambda-public-url|6.0|lambda_public_url_introduced|"
+          )
+          for CASE in "${CASES[@]}"; do
+            IFS='|' read -r DIR EXPECTED MUST_FIRE MUST_NOT_FIRE <<< "${CASE}"
+            OUT=".architex-examples/${DIR}"
+            mkdir -p "${OUT}"
+            ./architex report "./examples/${DIR}/base" "./examples/${DIR}/head" --out "${OUT}" > "${OUT}.stdout"
+            BUNDLE="$(ls -td ${OUT}/*/ | head -1)"
+            SCORE_JSON="${BUNDLE}score.json"
+            ACTUAL=$(grep -E '"score":\s*[0-9]+\.?[0-9]*' "${SCORE_JSON}" | head -1 | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+            if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+              echo "::error file=${SCORE_JSON}::example ${DIR}: expected score ${EXPECTED}, got ${ACTUAL}"
+              exit 1
+            fi
+            if [ -n "${MUST_FIRE}" ] && ! grep -q "${MUST_FIRE}" "${SCORE_JSON}"; then
+              echo "::error file=${SCORE_JSON}::example ${DIR}: missing expected rule ${MUST_FIRE}"
+              exit 1
+            fi
+            if [ -n "${MUST_NOT_FIRE}" ] && grep -q "${MUST_NOT_FIRE}" "${SCORE_JSON}"; then
+              echo "::error file=${SCORE_JSON}::example ${DIR}: forbidden rule ${MUST_NOT_FIRE} fired"
+              exit 1
+            fi
+            echo "Example ${DIR}: score=${ACTUAL} (ok)"
+          done
+          echo "All 6 examples produced their expected scores and rule sets."
+
+      - name: Library-mode selftest (var.X ? 1 : 0 phantoms)
+        run: |
+          set -euo pipefail
+          mkdir -p .architex-library
+          ./architex report ./testdata/library_mode_base ./testdata/library_mode_head --out ./.architex-library > /dev/null
+          BUNDLE="$(ls -td .architex-library/*/ | head -1)"
+          SUMMARY="${BUNDLE}summary.md"
+          # Library mode must materialize phantoms (the conditional EKS
+          # cluster shows up as a "?"-prefixed node in the diagram).
+          if ! grep -q "? compute: aws_eks_cluster.control" "${SUMMARY}"; then
+            echo "::error file=${SUMMARY}::library-mode phantom EKS cluster missing from diagram"
+            exit 1
+          fi
+          # The risk engine MUST refuse to score conditional phantoms,
+          # even when their literal attributes would normally trip a rule.
+          for FORBIDDEN in eks_public_endpoint eks_no_logging; do
+            if grep -q "${FORBIDDEN}" "${BUNDLE}score.json"; then
+              echo "::error file=${BUNDLE}score.json::risk engine fired ${FORBIDDEN} on a conditional phantom"
+              exit 1
+            fi
+          done
+          echo "Library-mode selftest: phantoms rendered, risk engine correctly silent."
+
       - name: Assert all five §10.1 sections are present in summary.md
         run: |
           set -euo pipefail
