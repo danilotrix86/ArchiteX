@@ -141,6 +141,7 @@ jobs:
           name: architex-selftest-bundle-${{ github.run_id }}
           path: ./.architex/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
 
   dogfood:
