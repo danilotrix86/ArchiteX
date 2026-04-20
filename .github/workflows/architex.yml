@@ -92,7 +92,7 @@ jobs:
           done
           echo "All 6 examples produced their expected scores and rule sets."
 
-      - name: Library-mode selftest (var.X ? 1 : 0 phantoms)
+      - name: "Library-mode selftest (var.X ? 1 : 0 phantoms)"
         run: |
           set -euo pipefail
           mkdir -p .architex-library
