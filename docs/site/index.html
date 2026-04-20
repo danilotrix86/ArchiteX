@@ -1,237 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ArchiteX — The Architecture Firewall for Pull Requests</title>
-  <meta name="description" content="ArchiteX is a free, open-source GitHub Action that catches risky Terraform topology before it merges. Deterministic. Local. Free.">
-  <meta name="color-scheme" content="light dark">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230366d6'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='-apple-system,BlinkMacSystemFont,sans-serif' font-size='28' font-weight='800' fill='white'%3EAx%3C/text%3E%3C/svg%3E">
+  <meta name="description" content="Catch risky Terraform topology changes in every pull request. Deterministic risk score, plain-English summary, focused delta diagram. Runs on your runner. Zero exfiltration. 45 AWS resource types, 18 risk rules, MIT licensed."/>
+  <meta property="og:title" content="ArchiteX — The Architecture Firewall for Pull Requests"/>
+  <meta property="og:description" content="Free, open-source GitHub Action. Deterministic architectural review on every Terraform PR. 45 AWS resources, 18 risk rules, library mode, baseline detection. Runs on your runner. MIT licensed."/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="https://github.com/danilotrix86/ArchiteX"/>
+  <meta name="twitter:card" content="summary_large_image"/>
+  <meta name="twitter:title" content="ArchiteX — The Architecture Firewall for Pull Requests"/>
+  <meta name="twitter:description" content="Catch risky Terraform topology changes before they merge. Deterministic. On-runner. MIT."/>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Crect x='1' y='1' width='7' height='7' rx='1.5' fill='%2300e887' opacity='0.9'/%3E%3Crect x='10' y='1' width='7' height='7' rx='1.5' fill='%2300e887' opacity='0.45'/%3E%3Crect x='1' y='10' width='7' height='7' rx='1.5' fill='%2300e887' opacity='0.45'/%3E%3Crect x='10' y='10' width='7' height='7' rx='1.5' fill='%2300e887' opacity='0.15'/%3E%3C/svg%3E"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
   <style>
-    :root {
-      --bg: #0d1117;
-      --bg-elev: #161b22;
-      --bg-card: #1f242d;
-      --fg: #f0f6fc;
-      --fg-muted: #8b949e;
-      --accent: #58a6ff;
-      --accent-hi: #79c0ff;
-      --good: #3fb950;
-      --warn: #d29922;
-      --bad: #f85149;
-      --border: #30363d;
-      --maxw: 1100px;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-hi); text-decoration: underline; }
-    code { background: var(--bg-elev); padding: 2px 6px; border-radius: 4px; font-size: 0.92em; }
-    pre {
-      background: var(--bg-elev);
-      padding: 18px 20px;
-      border-radius: 8px;
-      overflow-x: auto;
-      border: 1px solid var(--border);
-      font-size: 0.92em;
-      line-height: 1.5;
-    }
-    pre code { background: transparent; padding: 0; }
-    nav {
-      position: sticky;
-      top: 0;
-      background: rgba(13, 17, 23, 0.85);
-      backdrop-filter: blur(8px);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
-      z-index: 10;
-    }
-    nav .inner {
-      max-width: var(--maxw);
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      gap: 24px;
-    }
-    nav .brand { font-weight: 700; font-size: 1.15em; }
-    nav .brand a { color: var(--fg); }
-    nav .links { display: flex; gap: 22px; margin-left: auto; font-size: 0.95em; }
-    nav .links a { color: var(--fg-muted); }
-    nav .links a:hover { color: var(--fg); text-decoration: none; }
-
-    section { padding: 56px 24px; border-bottom: 1px solid var(--border); }
-    section .inner { max-width: var(--maxw); margin: 0 auto; }
-    h1, h2, h3 { line-height: 1.25; }
-    h1 { font-size: 3.0em; margin: 0 0 16px; letter-spacing: -0.02em; }
-    h2 { font-size: 2.0em; margin: 0 0 14px; letter-spacing: -0.01em; }
-    h3 { font-size: 1.3em; margin: 0 0 10px; }
-    p.lead { font-size: 1.25em; color: var(--fg-muted); margin: 0 0 28px; max-width: 780px; }
-
-    .hero { text-align: center; padding-top: 96px; padding-bottom: 80px; background: radial-gradient(ellipse at top, rgba(88,166,255,0.12), transparent 60%); }
-    .hero p.lead { margin-left: auto; margin-right: auto; }
-    .hero .cta { display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-    .btn {
-      display: inline-block;
-      padding: 12px 22px;
-      border-radius: 8px;
-      font-weight: 600;
-      text-decoration: none;
-      transition: transform 0.1s ease, background 0.15s ease;
-      border: 1px solid var(--border);
-    }
-    .btn:hover { transform: translateY(-1px); text-decoration: none; }
-    .btn-primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
-    .btn-primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); color: #0d1117; }
-    .btn-ghost { background: transparent; color: var(--fg); }
-    .btn-ghost:hover { background: var(--bg-elev); color: var(--fg); }
-
-    .badges { margin-top: 28px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-    .badges img { height: 22px; }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 24px;
-      margin-top: 32px;
-    }
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 22px;
-    }
-    .card h3 { margin-top: 0; }
-    .card .num { color: var(--accent); font-weight: 700; }
-
-    table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 0.95em; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
-    th { color: var(--fg-muted); font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
-    td .yes { color: var(--good); font-weight: 700; }
-    td .no  { color: var(--bad);  font-weight: 700; }
-    td .meh { color: var(--warn); font-weight: 700; }
-
-    .examples-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 24px; }
-    .ex {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 18px 20px;
-    }
-    .ex .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.78em; font-weight: 600; margin-bottom: 8px; }
-    .ex .pill.high { background: rgba(248, 81, 73, 0.18); color: var(--bad); }
-    .ex .pill.med  { background: rgba(210, 153, 34, 0.18); color: var(--warn); }
-    .ex .pill.low  { background: rgba(63, 185, 80, 0.18); color: var(--good); }
-    .ex h3 { margin: 4px 0 6px; font-size: 1.05em; }
-    .ex p { margin: 0; color: var(--fg-muted); font-size: 0.95em; }
-
-    footer {
-      padding: 36px 24px 56px;
-      text-align: center;
-      color: var(--fg-muted);
-      font-size: 0.9em;
-    }
-    footer a { color: var(--fg-muted); }
-
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: #0a0a0a; color: #ededed; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0a0a0a; }
+    ::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+    pre, code { font-family: 'JetBrains Mono', monospace; }
+    a { text-decoration: none; }
     @media (max-width: 640px) {
-      h1 { font-size: 2.2em; }
-      h2 { font-size: 1.6em; }
-      nav .links { display: none; }
+      .hide-mobile { display: none !important; }
+      .two-col-stack { grid-template-columns: 1fr !important; }
+      .qs-grid { grid-template-columns: 1fr !important; }
     }
   </style>
 </head>
 <body>
+<div id="root"></div>
 
-<nav>
-  <div class="inner">
-    <div class="brand"><a href="#">ArchiteX</a></div>
-    <div class="links">
-      <a href="#why">Why</a>
-      <a href="#how">How it works</a>
-      <a href="#examples">Examples</a>
-      <a href="./report.html">Live sample report</a>
-      <a href="https://github.com/danilotrix86/ArchiteX">GitHub</a>
+<!-- ── ICONS ──────────────────────────────────────────────────────── -->
+<script type="text/babel">
+const S = ({size=16,col='currentColor',children,...p}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}>{children}</svg>
+);
+const IconStar         = ({size=16,col='currentColor'}) => <S size={size} col={col}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></S>;
+const IconExternalLink = ({size=16,col='currentColor'}) => <S size={size} col={col}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></S>;
+const IconChevronRight = ({size=16,col='currentColor'}) => <S size={size} col={col}><polyline points="9 18 15 12 9 6"/></S>;
+const IconCopy         = ({size=16,col='currentColor'}) => <S size={size} col={col}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></S>;
+const IconCheck        = ({size=16,col='currentColor'}) => <S size={size} col={col}><polyline points="20 6 9 17 4 12"/></S>;
+const IconGithub       = ({size=16,col='currentColor'}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={col} stroke="none">
+    <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z"/>
+  </svg>
+);
+Object.assign(window, { IconStar, IconExternalLink, IconChevronRight, IconCopy, IconCheck, IconGithub });
+</script>
+
+<!-- ── NAV ─────────────────────────────────────────────────────────── -->
+<script type="text/babel">
+const ACCENT = '#00e887';
+const REPO_URL = 'https://github.com/danilotrix86/ArchiteX';
+const DOCS_URL = 'https://github.com/danilotrix86/ArchiteX/blob/main/docs/github-action.md';
+const REPORT_URL = './report.html';
+
+const { IconStar: Star, IconExternalLink: ExtLink } = window;
+
+function Nav() {
+  const [scrolled, setScrolled] = React.useState(false);
+  React.useEffect(() => {
+    const h = () => setScrolled(window.scrollY > 20);
+    window.addEventListener('scroll', h, { passive: true });
+    return () => window.removeEventListener('scroll', h);
+  }, []);
+  const links = [
+    { label:'How it works', href:'#pipeline' },
+    { label:'Quickstart',   href:'#install'  },
+    { label:'Rules',        href:'#defaults' },
+    { label:'Trust model',  href:'#trust'    },
+    { label:'Sample report',href: REPORT_URL },
+    { label:'Docs', href: DOCS_URL, ext:true },
+  ];
+  return (
+    <nav style={{ position:'fixed',top:0,left:0,right:0,zIndex:50,
+      padding:'0 24px',
+      background: scrolled ? 'rgba(10,10,10,0.92)' : 'transparent',
+      backdropFilter: scrolled ? 'blur(14px)' : 'none',
+      borderBottom: scrolled ? '1px solid #1a1a1a' : '1px solid transparent',
+      transition:'all 0.2s ease' }}>
+      <div style={{maxWidth:1120,margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between',height:56}}>
+        <a href="#" style={{display:'flex',alignItems:'center',gap:8,color:'#ededed',fontWeight:700,letterSpacing:'-0.03em',fontSize:15}}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="1" y="1" width="7" height="7" rx="1.5" fill={ACCENT} opacity="0.9"/>
+            <rect x="10" y="1" width="7" height="7" rx="1.5" fill={ACCENT} opacity="0.45"/>
+            <rect x="1" y="10" width="7" height="7" rx="1.5" fill={ACCENT} opacity="0.45"/>
+            <rect x="10" y="10" width="7" height="7" rx="1.5" fill={ACCENT} opacity="0.15"/>
+          </svg>
+          ArchiteX
+        </a>
+        <div style={{display:'flex',gap:28,alignItems:'center'}} className="hide-mobile">
+          {links.map(l=>(
+            <a key={l.label} href={l.href} target={l.ext?'_blank':undefined} rel={l.ext?'noopener':undefined}
+               style={{fontSize:13,color:'#777',transition:'color 0.15s'}}
+               onMouseEnter={e=>e.target.style.color='#ededed'} onMouseLeave={e=>e.target.style.color='#777'}>{l.label}</a>
+          ))}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <a href={REPO_URL} target="_blank" rel="noopener"
+             style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',border:'1px solid #1f1f1f',borderRadius:4,fontSize:12,fontFamily:'"JetBrains Mono",monospace',color:'#555',transition:'all 0.15s'}}
+             onMouseEnter={e=>{ e.currentTarget.style.borderColor='#2a2a2a'; e.currentTarget.style.color='#999'; }}
+             onMouseLeave={e=>{ e.currentTarget.style.borderColor='#1f1f1f'; e.currentTarget.style.color='#555'; }}
+             className="hide-mobile">
+            <Star size={11} col='currentColor'/> Star
+          </a>
+          <a href="#install" style={{padding:'6px 14px',background:ACCENT,color:'#000',fontSize:13,fontWeight:600,borderRadius:4,letterSpacing:'-0.01em'}}>Install</a>
+        </div>
+      </div>
+    </nav>
+  );
+}
+Object.assign(window, { Nav });
+</script>
+
+<!-- ── HERO ────────────────────────────────────────────────────────── -->
+<script type="text/babel">
+const { IconChevronRight: ChevronRight, IconExternalLink: EL2 } = window;
+
+function YamlLine({ line, idx }) {
+  const lineNum = String(idx + 1).padStart(2, ' ');
+  const indent = (line.match(/^(\s*)/) || ['',''])[1];
+  const content = line.trim();
+  let node;
+  if (content.startsWith('- uses:')) {
+    const val = content.replace('- uses:', '').trim();
+    const at = val.indexOf('@');
+    node = (<><span style={{color:'#555'}}>{indent}- </span><span style={{color:'#79c0ff'}}>uses</span><span style={{color:'#555'}}>: </span>
+      {at>=0 ? <><span style={{color:'#a5d6ff'}}>{val.slice(0,at)}</span><span style={{color:'#00e887'}}>{val.slice(at)}</span></> : <span style={{color:'#a5d6ff'}}>{val}</span>}</>);
+  } else if (content.startsWith('- ')) {
+    node = <><span style={{color:'#555'}}>{indent}- </span><span style={{color:'#a5d6ff'}}>{content.slice(2)}</span></>;
+  } else if (content.includes(':')) {
+    const ci = content.indexOf(':');
+    const key = content.slice(0, ci);
+    const val = content.slice(ci + 1).trim();
+    node = (<><span style={{color:'#555'}}>{indent}</span><span style={{color:'#79c0ff'}}>{key}</span><span style={{color:'#555'}}>:</span>{val && <span style={{color:'#a5d6ff'}}> {val}</span>}</>);
+  } else {
+    node = <span style={{color:'#a5d6ff'}}>{line}</span>;
+  }
+  return (
+    <div style={{display:'flex',gap:16,lineHeight:'1.7'}}>
+      <span style={{color:'#2a2a2a',userSelect:'none',minWidth:20,textAlign:'right',flexShrink:0}}>{lineNum}</span>
+      <span>{node}</span>
     </div>
-  </div>
-</nav>
+  );
+}
 
-<section class="hero">
-  <div class="inner">
-    <h1>The Architecture Firewall<br>for your Pull Requests</h1>
-    <p class="lead">ArchiteX reads the Terraform diff in a PR and posts a deterministic architectural review back as a sticky comment. Catch risky topology before it merges. Local. Free. No SaaS.</p>
-    <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/danilotrix86/ArchiteX#-30-second-quickstart">Get started in 30 seconds</a>
-      <a class="btn btn-ghost" href="./report.html">See a live sample report &rarr;</a>
-    </div>
-    <div class="badges">
-      <img alt="Release" src="https://img.shields.io/github/v/release/danilotrix86/ArchiteX?display_name=tag&color=blue">
-      <img alt="Tests" src="https://github.com/danilotrix86/ArchiteX/actions/workflows/architex.yml/badge.svg">
-      <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg">
-      <img alt="Stars" src="https://img.shields.io/github/stars/danilotrix86/ArchiteX?style=social">
-    </div>
-  </div>
-</section>
-
-<section id="why">
-  <div class="inner">
-    <h2>What makes a PR review faster</h2>
-    <p class="lead">Static-analysis tools tell you which line has a problem. ArchiteX tells you what changed in your architecture and why a reviewer should care.</p>
-    <div class="grid">
-      <div class="card">
-        <h3><span class="num">45</span> AWS resource types</h3>
-        <p>VPC, EC2, S3, IAM, Lambda, API Gateway, CloudFront, KMS, SNS/SQS, NACL, EBS, ECS, EKS, Auto Scaling, RDS groups. Tracking the architectural primitives that matter, not every CRUD-style resource.</p>
-      </div>
-      <div class="card">
-        <h3><span class="num">18</span> deterministic risk rules</h3>
-        <p>Each rule has a fixed weight, a stable ID, and a one-line explanation. No probabilistic scoring, no model calls, no hidden config. Same diff → same score, every time.</p>
-      </div>
-      <div class="card">
-        <h3><span class="num">0</span> SaaS, telemetry, accounts</h3>
-        <p>Analysis runs in your GitHub Actions runner. The only network call is the PR comment to the GitHub REST API using the workflow&rsquo;s own <code>GITHUB_TOKEN</code>.</p>
-      </div>
-      <div class="card">
-        <h3>Library mode for module authors</h3>
-        <p>Resources gated behind <code>count = var.create ? 1 : 0</code> render as <strong>conditional phantoms</strong> in the diagram. Risk rules refuse to score them &mdash; no false positives on conditional gates.</p>
-      </div>
-      <div class="card">
-        <h3>Self-contained HTML report</h3>
-        <p>Every run produces a <code>report.html</code> with no JavaScript, no CDN, no remote fonts. Open it in an air-gapped browser and see the full review with severity badges, reasons, suppressions, the Mermaid diagram, and a SHA-256 manifest.</p>
-      </div>
-      <div class="card">
-        <h3>Baseline anomaly detection</h3>
-        <p>Optional <code>.architex/baseline.json</code> records the <em>kinds</em> of resources your repo has ever contained &mdash; no raw HCL, no names. New resource types show up as low-weight signals that layer on top of the existing rules.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="how">
-  <div class="inner">
-    <h2>How it works</h2>
-    <p class="lead">A strict four-stage pipeline. Every stage is deterministic. The Interpreter is template-based &mdash; no inference, no model calls, no network.</p>
-    <pre><code>base/*.tf  ─┐
-            ├─&gt; 1. Fact-Finder  ──&gt;  2. Delta Engine  ──&gt;  3. Risk &amp; Policy  ──&gt;  4. Interpreter  ──&gt;  Sticky PR comment
-head/*.tf  ─┘    HCL parse           added · removed         18 rules                Mermaid · MD            +
-                 graph build         · changed               weighted score          HTML · audit            Audit bundle
-                                                                                                             (manifest.json
-                                                                                                             with SHA-256)</code></pre>
-    <p>See the full architecture spec in <a href="https://github.com/danilotrix86/ArchiteX/blob/main/master.md">master.md</a>.</p>
-  </div>
-</section>
-
-<section id="quickstart">
-  <div class="inner">
-    <h2>30-second quickstart</h2>
-    <p class="lead">Drop this into your Terraform repo at <code>.github/workflows/architex.yml</code> and you&rsquo;re done.</p>
-    <pre><code>name: ArchiteX
-on: pull_request
+const YAML_SRC = `name: ArchiteX
+on:
+  pull_request:
 permissions:
   contents: read
   pull-requests: write
@@ -241,61 +165,697 @@ jobs:
     steps:
       - uses: danilotrix86/ArchiteX@v1.3.1
         with:
-          terraform-dir: infra</code></pre>
-    <p>Open a PR that touches <code>infra/*.tf</code>. ArchiteX posts a sticky comment with the score, the diagram, and the reasons. Add <code>mode: blocking</code> to fail the build on high-risk changes.</p>
-    <p><a class="btn btn-primary" href="./report.html">See what the report looks like &rarr;</a></p>
-  </div>
-</section>
+          terraform-dir: infra`;
 
-<section id="examples">
-  <div class="inner">
-    <h2>Examples gallery</h2>
-    <p class="lead">Six reviewer-grade scenarios with full <code>base/</code> + <code>head/</code> snapshots. Each one is also a CI regression check.</p>
-    <div class="examples-list">
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/01-public-alb">
-        <span class="pill high">9.0 / HIGH</span>
-        <h3>01 &mdash; Public ALB introduced</h3>
-        <p>Open SG to <code>0.0.0.0/0</code>, add internet-facing load balancer.</p>
-      </a>
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/02-eks-public-endpoint">
-        <span class="pill med">5.0 / MEDIUM</span>
-        <h3>02 &mdash; EKS open API + no logging</h3>
-        <p>EKS cluster with public endpoint, no CIDR allow-list, no control-plane logs.</p>
-      </a>
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/03-iam-admin-attachment">
-        <span class="pill med">3.5 / MEDIUM</span>
-        <h3>03 &mdash; <code>AdministratorAccess</code> attached</h3>
-        <p>An <code>aws_iam_role_policy_attachment</code> that binds AWS&rsquo;s most privileged policy.</p>
-      </a>
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/04-cloudfront-no-waf">
-        <span class="pill med">5.5 / MEDIUM</span>
-        <h3>04 &mdash; CloudFront without a WAF</h3>
-        <p>New entry point exposed to the internet with no <code>web_acl_id</code>.</p>
-      </a>
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/05-library-mode">
-        <span class="pill low">0.0 / LOW</span>
-        <h3>05 &mdash; Library mode (module-author repo)</h3>
-        <p>Every resource gated behind <code>var.create ? 1 : 0</code>. Phantoms render with <code>?</code>; no rules fire.</p>
-      </a>
-      <a class="ex" href="https://github.com/danilotrix86/ArchiteX/tree/main/examples/06-lambda-public-url">
-        <span class="pill med">6.0 / MEDIUM</span>
-        <h3>06 &mdash; Public Lambda URL</h3>
-        <p>Lambda exposed via Function URL with <code>authorization_type = NONE</code>.</p>
-      </a>
+function Hero() {
+  const [caret, setCaret] = React.useState(true);
+  React.useEffect(() => {
+    const t = setInterval(() => setCaret(c => !c), 530);
+    return () => clearInterval(t);
+  }, []);
+  const stats = [['4','stages'],['45','AWS resources'],['18','risk rules'],['0 bytes','exfiltrated'],['v1.3','latest']];
+  return (
+    <section style={{position:'relative',paddingTop:120,paddingBottom:96,paddingLeft:24,paddingRight:24,
+      background:`radial-gradient(ellipse 1100px 550px at 50% -80px, ${ACCENT}0d 0%, transparent 65%)`}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <div style={{display:'inline-flex',alignItems:'center',gap:8,marginBottom:28,padding:'4px 12px',border:'1px solid #1f1f1f',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:12,color:'#777'}}>
+          <span style={{width:6,height:6,borderRadius:'50%',background:ACCENT,flexShrink:0}}/>
+          Open source • MIT • Runs on your runner
+        </div>
+        <h1 style={{fontSize:'clamp(44px,8vw,96px)',fontWeight:700,letterSpacing:'-0.045em',lineHeight:1.02,color:'#ededed',marginBottom:24}}>
+          The architecture firewall for pull requests<span style={{color:ACCENT,opacity:caret?1:0,transition:'opacity 0.08s'}}>_</span>
+        </h1>
+        <p style={{fontSize:19,lineHeight:1.6,color:'#9a9a9a',marginBottom:40,maxWidth:1000}}>
+          ArchiteX reads the Terraform diff in a PR and posts a deterministic architectural review back as a sticky comment. Risk score, plain-English summary, focused delta diagram. Runs on your runner. Zero exfiltration.
+        </p>
+        <div style={{display:'flex',flexWrap:'wrap',gap:12,marginBottom:48}}>
+          <a href="#install" style={{display:'flex',alignItems:'center',gap:6,padding:'10px 20px',background:ACCENT,color:'#000',fontSize:13,fontWeight:600,borderRadius:4,letterSpacing:'-0.01em'}}>
+            Get started <ChevronRight size={14}/>
+          </a>
+          <a href={REPORT_URL}
+             style={{display:'flex',alignItems:'center',gap:6,padding:'10px 20px',border:'1px solid #2a2a2a',color:'#ededed',fontSize:13,fontWeight:500,borderRadius:4,transition:'border-color 0.15s'}}
+             onMouseEnter={e=>e.currentTarget.style.borderColor='#444'} onMouseLeave={e=>e.currentTarget.style.borderColor='#2a2a2a'}>
+            See a live sample report <ChevronRight size={14}/>
+          </a>
+          <a href={REPO_URL} target="_blank" rel="noopener"
+             style={{display:'flex',alignItems:'center',gap:6,padding:'10px 20px',border:'1px solid #1f1f1f',color:'#aaa',fontSize:13,fontWeight:500,borderRadius:4,transition:'border-color 0.15s'}}
+             onMouseEnter={e=>e.currentTarget.style.borderColor='#2a2a2a'} onMouseLeave={e=>e.currentTarget.style.borderColor='#1f1f1f'}>
+            View on GitHub <EL2 size={13}/>
+          </a>
+        </div>
+        {/* Terminal card */}
+        <div style={{border:'1px solid #1f1f1f',borderRadius:6,overflow:'hidden',background:'#0c0c0c'}}>
+          <div style={{display:'flex',alignItems:'center',padding:'10px 16px',borderBottom:'1px solid #1a1a1a',background:'#0a0a0a'}}>
+            <div style={{display:'flex',gap:6}}>{['#ff5f57','#febc2e','#28c840'].map(c=><div key={c} style={{width:10,height:10,borderRadius:'50%',background:c}}/>)}</div>
+            <span style={{flex:1,textAlign:'center',fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#2a2a2a'}}>.github/workflows/architex.yml</span>
+          </div>
+          <pre style={{margin:0,padding:'20px 24px',fontFamily:'"JetBrains Mono",monospace',fontSize:13,lineHeight:1.7,overflowX:'auto'}}>
+            {YAML_SRC.split('\n').map((line,i)=><YamlLine key={i} line={line} idx={i}/>)}
+          </pre>
+        </div>
+        {/* Stat strip */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:'16px 40px',marginTop:24,paddingTop:24,borderTop:'1px solid #1a1a1a'}}>
+          {stats.map(([num,label])=>(
+            <div key={label} style={{display:'flex',alignItems:'baseline',gap:6}}>
+              <span style={{fontFamily:'"JetBrains Mono",monospace',fontSize:20,fontWeight:700,color:ACCENT}}>{num}</span>
+              <span style={{fontSize:13,color:'#888'}}>{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { Hero, YamlLine });
+</script>
+
+<!-- ── PROBLEMS + PIPELINE ────────────────────────────────────────── -->
+<script type="text/babel">
+function SectionLabel({ children }) {
+  return <div style={{fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:ACCENT,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:12}}>{children}</div>;
+}
+
+function Problems() {
+  const cards = [
+    { title:'Diffs hide topology', body:"You can't see what's newly public, newly reachable, or what crossed a trust boundary. Line diffs show syntax, not architecture." },
+    { title:'Scanners stop at the resource', body:'SAST, IaC linters, and CSPMs miss architectural relationships entirely. A rule can fire on a resource without understanding its role in the graph.' },
+    { title:"Code can't leave the repo", body:"Regulated teams can't adopt SaaS tools that exfiltrate Terraform. Compliance mandates on-runner processing — full stop." },
+  ];
+  return (
+    <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>The problem</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:40}}>Architectural review is broken</h2>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}}>
+          {cards.map((c,i)=>(
+            <div key={i} style={{background:'#0a0a0a',padding:'32px 28px',transition:'background 0.15s'}}
+                 onMouseEnter={e=>e.currentTarget.style.background='#0e0e0e'} onMouseLeave={e=>e.currentTarget.style.background='#0a0a0a'}>
+              <div style={{width:28,height:28,border:'1px solid #1f1f1f',borderRadius:4,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:16,fontFamily:'"JetBrains Mono",monospace',fontSize:12,color:'#555'}}>
+                {String(i+1).padStart(2,'0')}
+              </div>
+              <h3 style={{fontSize:15,fontWeight:600,color:'#ededed',marginBottom:10,letterSpacing:'-0.02em'}}>{c.title}</h3>
+              <p style={{fontSize:13,lineHeight:1.7,color:'#999',margin:0}}>{c.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Pipeline() {
+  const stages = [
+    { n:'01', name:'Fact-Finder',          desc:'Parse HCL, build infrastructure graph, resolve dependencies.', tag:'deterministic' },
+    { n:'02', name:'Delta Engine',         desc:'Semantic diff between base and head graphs. Identifies what changed.', tag:'deterministic' },
+    { n:'03', name:'Risk & Policy Engine', desc:'18 built-in rules, weighted scoring, explainable reasons per finding.', tag:'deterministic' },
+    { n:'04', name:'Interpreter',          desc:'Mermaid diagram, plain-English summary, review-focus bullets.', tag:'deterministic' },
+  ];
+  return (
+    <section id="pipeline" style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>How it works</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:8}}>Deterministic by design</h2>
+        <p style={{fontSize:14,color:'#888',marginBottom:48,maxWidth:560}}>Four discrete stages run in sequence. Every stage is deterministic, auditable, and reproducible. The Interpreter is template-based — no inference, no model calls, no network.</p>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:0,background:'#1a1a1a',borderRadius:6,overflow:'hidden',border:'1px solid #1a1a1a'}}>
+          {stages.map((s,i)=>(
+            <div key={i} style={{background:'#0a0a0a',padding:'24px 20px',borderRight: i<stages.length-1?'1px solid #1a1a1a':'none',position:'relative',transition:'background 0.15s'}}
+                 onMouseEnter={e=>e.currentTarget.style.background='#0e0e0e'} onMouseLeave={e=>e.currentTarget.style.background='#0a0a0a'}>
+              {i < stages.length-1 && (
+                <div style={{position:'absolute',right:-10,top:'50%',transform:'translateY(-50%)',zIndex:2,width:20,height:20,background:'#0c0c0c',border:'1px solid #1f1f1f',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <svg width="7" height="7" viewBox="0 0 7 7"><path d="M1 3.5h5M3.5 1.5l2 2-2 2" stroke="#333" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </div>
+              )}
+              <div style={{fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#2a2a2a',marginBottom:12}}>{s.n}</div>
+              <div style={{fontSize:14,fontWeight:600,color:'#ededed',marginBottom:8,letterSpacing:'-0.02em'}}>{s.name}</div>
+              <div style={{fontSize:12,lineHeight:1.65,color:'#999',marginBottom:16}}>{s.desc}</div>
+              <span style={{display:'inline-block',padding:'2px 8px',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:10,
+                background:'rgba(0,232,135,0.07)',color:ACCENT,border:'1px solid rgba(0,232,135,0.18)'}}>
+                {s.tag}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div style={{marginTop:20,padding:'14px 20px',border:'1px solid #1f1f1f',borderRadius:4,background:'#0c0c0c'}}>
+          <p style={{margin:0,fontSize:13,color:'#888',fontStyle:'italic',lineHeight:1.6}}>
+            "Same Terraform input always produces the same review. No models, no heuristics, no surprises."
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { SectionLabel, Problems, Pipeline });
+</script>
+
+<!-- ── PR COMMENT ─────────────────────────────────────────────────── -->
+<script type="text/babel">
+function DeltaDiagram() {
+  const nodes = [
+    { id:'igw', label:'aws_internet_gateway', x:10,  y:80, w:155, kind:'neutral' },
+    { id:'alb', label:'aws_lb.web',           x:200, y:80, w:118, kind:'added'   },
+    { id:'sg',  label:'aws_security_group.web',x:352, y:80, w:182, kind:'changed' },
+  ];
+  const ctxNodes = [
+    { label:'aws_vpc',    x:352, y:148, w:76  },
+    { label:'aws_subnet', x:440, y:148, w:90  },
+  ];
+  const ks = {
+    added:   { fill:'rgba(0,232,135,0.08)',  stroke:'rgba(0,232,135,0.45)', text:'#00e887' },
+    changed: { fill:'rgba(255,165,0,0.07)',  stroke:'rgba(255,165,0,0.4)',  text:'#f0a030' },
+    neutral: { fill:'rgba(80,80,80,0.1)',    stroke:'rgba(80,80,80,0.3)',   text:'#777'    },
+    ctx:     { fill:'rgba(30,30,30,0.5)',    stroke:'rgba(55,55,55,0.5)',   text:'#444'    },
+  };
+  return (
+    <div style={{overflowX:'auto'}}>
+      <svg viewBox="0 0 545 190" width="100%" style={{maxWidth:545,display:'block',fontFamily:'"JetBrains Mono",monospace'}}>
+        <defs><marker id="arh" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2a2a2a"/></marker></defs>
+        <line x1={165} y1={90} x2={198} y2={90} stroke="#2a2a2a" strokeWidth="1" markerEnd="url(#arh)"/>
+        <line x1={318} y1={90} x2={350} y2={90} stroke="#2a2a2a" strokeWidth="1" markerEnd="url(#arh)"/>
+        <line x1={443} y1={116} x2={443} y2={146} stroke="#2a2a2a" strokeWidth="1" strokeDasharray="3,3"/>
+        {ctxNodes.map((n,i)=>(
+          <g key={i}>
+            <rect x={n.x} y={n.y} width={n.w} height={22} rx="2" fill={ks.ctx.fill} stroke={ks.ctx.stroke} strokeWidth="0.5"/>
+            <text x={n.x+n.w/2} y={n.y+14} textAnchor="middle" fontSize="9" fill={ks.ctx.text}>{n.label}</text>
+          </g>
+        ))}
+        {nodes.map(n=>{
+          const s = ks[n.kind];
+          return (
+            <g key={n.id}>
+              <rect x={n.x} y={n.y-18} width={n.w} height={36} rx="3" fill={s.fill} stroke={s.stroke} strokeWidth="1"/>
+              <text x={n.x+n.w/2} y={n.y-4} textAnchor="middle" fontSize="9.5" fill={s.text}>{n.label}</text>
+              <text x={n.x+n.w/2} y={n.y+10} textAnchor="middle" fontSize="8" fill={n.kind==='added'?'rgba(0,232,135,0.45)':n.kind==='changed'?'rgba(240,160,48,0.45)':'transparent'}>
+                {n.kind==='added'?'+ added':n.kind==='changed'?'~ changed':''}
+              </text>
+            </g>
+          );
+        })}
+        <g transform="translate(10,163)">
+          <rect width="7" height="7" rx="1" fill="rgba(0,232,135,0.12)" stroke="rgba(0,232,135,0.45)"/>
+          <text x="11" y="6.5" fontSize="8" fill="#444">added</text>
+          <rect x="48" width="7" height="7" rx="1" fill="rgba(255,165,0,0.08)" stroke="rgba(255,165,0,0.4)"/>
+          <text x="59" y="6.5" fontSize="8" fill="#444">changed</text>
+          <rect x="104" width="7" height="7" rx="1" fill="rgba(80,80,80,0.1)" stroke="rgba(80,80,80,0.3)"/>
+          <text x="115" y="6.5" fontSize="8" fill="#444">context</text>
+        </g>
+      </svg>
     </div>
-  </div>
-</section>
+  );
+}
 
-<footer>
-  <p>
-    Built by reviewers, for reviewers.
-    <a href="https://github.com/danilotrix86/ArchiteX">GitHub</a> &middot;
-    <a href="https://github.com/danilotrix86/ArchiteX/blob/main/CHANGELOG.md">Changelog</a> &middot;
-    <a href="https://github.com/danilotrix86/ArchiteX/blob/main/CONTRIBUTING.md">Contributing</a> &middot;
-    <a href="https://github.com/danilotrix86/ArchiteX/blob/main/LICENSE">MIT License</a>
-  </p>
-  <p>&copy; 2026 ArchiteX contributors</p>
-</footer>
+function PRComment() {
+  const gh = { page:'#0d1117', card:'#161b22', border:'#30363d', text:'#e6edf3', muted:'#8b949e', red:'#f85149', orange:'#d29922', codeBg:'#1c2128', hdr:'#161b22' };
+  const findings = [
+    { id:'public_exposure_introduced', weight:'4.0', color:gh.red    },
+    { id:'new_entry_point',            weight:'3.0', color:gh.orange  },
+    { id:'potential_data_exposure',    weight:'2.0', color:gh.orange  },
+  ];
+  const bullets = [
+    { w:'4.0', t:'aws_lb.web is a new Application Load Balancer with a public-facing scheme. Verify listener rules and target group trust boundaries.' },
+    { w:'3.0', t:'aws_security_group.web was modified. Confirm ingress 0.0.0.0/0 rules are intentional and scoped to required ports only.' },
+    { w:'2.0', t:'The load balancer sits adjacent to data-tier subnets. Confirm routing does not create a new data-access path.' },
+  ];
+  const C = ({ v }) => <code style={{background:gh.codeBg,padding:'1px 5px',borderRadius:3,fontSize:12,color:'#79c0ff',fontFamily:'"JetBrains Mono",monospace'}}>{v}</code>;
+  return (
+    <section id="pr-comment" style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Output</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:8}}>What your team sees on every PR</h2>
+        <p style={{fontSize:14,color:'#888',marginBottom:40,maxWidth:520}}>A deterministic review posted as a structured PR comment. No noise. No false positives. Same input, same output — every time.</p>
+        <div style={{border:`1px solid ${gh.border}`,borderRadius:6,overflow:'hidden',background:gh.card,fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 16px',background:gh.hdr,borderBottom:`1px solid ${gh.border}`}}>
+            <div style={{width:32,height:32,borderRadius:'50%',background:'linear-gradient(135deg,#1f6feb,#0d419d)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <svg width="16" height="16" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#00e887" opacity="0.9"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="#00e887" opacity="0.5"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="#00e887" opacity="0.5"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#00e887" opacity="0.2"/></svg>
+            </div>
+            <span style={{fontSize:13,fontWeight:600,color:gh.text}}>architex-bot</span>
+            <span style={{fontSize:13,color:gh.muted}}>commented just now</span>
+            <span style={{marginLeft:'auto',padding:'1px 8px',borderRadius:12,fontSize:11,border:`1px solid ${gh.border}`,color:gh.muted}}>bot</span>
+          </div>
+          {/* Body */}
+          <div style={{padding:'20px 24px',background:gh.page,color:gh.text}}>
+            {/* FAIL banner */}
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'rgba(248,81,73,0.09)',border:'1px solid rgba(248,81,73,0.28)',borderRadius:4,marginBottom:20}}>
+              <span style={{width:8,height:8,borderRadius:'50%',background:gh.red,flexShrink:0}}/>
+              <span style={{fontWeight:700,fontSize:14,color:gh.red}}>FAIL</span>
+              <span style={{fontSize:13,color:gh.text}}>— Risk Level:</span>
+              <span style={{padding:'2px 8px',background:'rgba(248,81,73,0.14)',border:'1px solid rgba(248,81,73,0.35)',borderRadius:3,fontSize:12,fontWeight:700,color:gh.red,fontFamily:'"JetBrains Mono",monospace'}}>HIGH (9.0 / 10)</span>
+            </div>
+            {/* Summary */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:600,color:gh.muted,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8}}>Plain-English Summary</div>
+              <p style={{fontSize:13,lineHeight:1.75,color:gh.text,margin:0}}>
+                This PR introduces a new Application Load Balancer (<C v="aws_lb.web"/>) with a public-facing scheme, accompanied by a modified security group (<C v="aws_security_group.web"/>) that now permits inbound traffic from <C v="0.0.0.0/0"/>. Together, these changes create a new public entry point into a subnet that was previously unreachable from the internet. The topology crosses a trust boundary — review scope and intent before merging.
+              </p>
+            </div>
+            {/* Review focus */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:600,color:gh.muted,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Suggested Review Focus</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {bullets.map((b,i)=>(
+                  <div key={i} style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                    <span style={{flexShrink:0,padding:'1px 6px',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:11,background:'rgba(248,81,73,0.09)',color:gh.red,border:'1px solid rgba(248,81,73,0.2)',marginTop:2}}>{b.w}</span>
+                    <span style={{fontSize:13,lineHeight:1.65,color:gh.text}}>{b.t}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Delta diagram */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:600,color:gh.muted,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:8}}>Delta Diagram</div>
+              <div style={{background:gh.codeBg,border:`1px solid ${gh.border}`,borderRadius:4,padding:'12px 16px'}}>
+                <DeltaDiagram/>
+              </div>
+            </div>
+            {/* Policy result */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:600,color:gh.muted,textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Policy Result</div>
+              <div style={{border:`1px solid ${gh.border}`,borderRadius:4,overflow:'hidden'}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 80px 100px',padding:'6px 12px',background:'#1c2128',borderBottom:`1px solid ${gh.border}`}}>
+                  {['Rule','Weight','Status'].map(h=><span key={h} style={{fontSize:11,color:gh.muted}}>{h}</span>)}
+                </div>
+                {findings.map((f,i)=>(
+                  <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 80px 100px',padding:'8px 12px',borderBottom:i<findings.length-1?`1px solid ${gh.border}`:'none',alignItems:'center'}}>
+                    <code style={{fontSize:11,fontFamily:'"JetBrains Mono",monospace',color:gh.text}}>{f.id}</code>
+                    <span style={{fontSize:12,fontFamily:'"JetBrains Mono",monospace',color:f.color}}>{f.weight}</span>
+                    <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:6,height:6,borderRadius:'50%',background:f.color}}/><span style={{fontSize:11,color:f.color}}>TRIGGERED</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{borderTop:`1px solid ${gh.border}`,paddingTop:12,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+              <span style={{fontSize:11,color:gh.muted,fontFamily:'"JetBrains Mono",monospace'}}>Generated by ArchiteX (deterministic mode)</span>
+              <a href={REPORT_URL}
+                 style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'#58a6ff',fontFamily:'"JetBrains Mono",monospace',textDecoration:'none'}}
+                 onMouseEnter={e=>e.currentTarget.style.textDecoration='underline'} onMouseLeave={e=>e.currentTarget.style.textDecoration='none'}>
+                Open the full self-contained HTML report →
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { PRComment });
+</script>
 
+<!-- ── DEFAULTS ───────────────────────────────────────────────────── -->
+<script type="text/babel">
+function Defaults() {
+  const resourceGroups = [
+    { label:'Network',          items:['aws_vpc','aws_subnet','aws_internet_gateway','aws_nat_gateway','aws_route53_zone','aws_route53_record','aws_db_subnet_group'] },
+    { label:'Access control',   items:['aws_security_group','aws_security_group_rule','aws_network_acl','aws_network_acl_rule','aws_s3_bucket_public_access_block','aws_s3_bucket_policy','aws_sns_topic_policy','aws_sqs_queue_policy','aws_db_parameter_group','aws_db_option_group'] },
+    { label:'Compute',          items:['aws_instance','aws_lambda_function','aws_ecs_cluster','aws_ecs_service','aws_ecs_task_definition','aws_eks_cluster','aws_eks_node_group','aws_eks_addon','aws_eks_fargate_profile','aws_launch_template','aws_autoscaling_group','aws_autoscaling_policy'] },
+    { label:'Entry points',     items:['aws_lb','aws_lambda_function_url','aws_apigatewayv2_api','aws_cloudfront_distribution'] },
+    { label:'Data & storage',   items:['aws_db_instance','aws_sns_topic','aws_sqs_queue','aws_secretsmanager_secret','aws_s3_bucket','aws_ebs_volume'] },
+    { label:'Identity',         items:['aws_iam_role','aws_iam_policy','aws_iam_role_policy_attachment','aws_kms_key','aws_kms_alias','aws_eks_identity_provider_config'] },
+  ];
+  const rules = [
+    { id:'public_exposure_introduced',   w:'4.0', t:'A node\'s public attribute changes from false to true.' },
+    { id:'s3_bucket_public_exposure',    w:'4.0', t:'Public-access block removed, or permissive bucket policy added.' },
+    { id:'eks_public_endpoint',          w:'3.5', t:'EKS cluster added with public endpoint and no CIDR allow-list.' },
+    { id:'iam_admin_policy_attached',    w:'3.5', t:'AdministratorAccess or IAMFullAccess attached to a role.' },
+    { id:'messaging_topic_public',       w:'3.5', t:'SNS/SQS policy with Allow … Principal = "*".' },
+    { id:'nacl_allow_all_ingress',       w:'3.5', t:'NACL rule allows 0.0.0.0/0 ingress with literal allow.' },
+    { id:'new_entry_point',              w:'3.0', t:'Added node has abstract type entry_point.' },
+    { id:'lambda_public_url_introduced', w:'3.0', t:'A lambda_function_url is added (layers on new_entry_point).' },
+    { id:'ebs_volume_unencrypted',       w:'3.0', t:'EBS volume has explicit literal encrypted = false.' },
+    { id:'new_data_resource',            w:'2.5', t:'Added node has abstract type data.' },
+    { id:'cloudfront_no_waf',            w:'2.5', t:'CloudFront distribution added with no web_acl_id.' },
+    { id:'potential_data_exposure',      w:'2.0', t:'Public exposure fires alongside a data/access-control change.' },
+    { id:'eks_no_logging',               w:'1.5', t:'EKS cluster added with no enabled_cluster_log_types.' },
+    { id:'first_time_abstract_type',     w:'1.5', t:'A new abstract type appears in the repo for the first time.' },
+    { id:'first_time_resource_type',     w:'1.0', t:'A new Terraform type appears for the first time.' },
+    { id:'asg_unrestricted_scaling',     w:'1.0', t:'ASG with max_size > 100 and no min_size floor.' },
+    { id:'first_time_edge_pair',         w:'0.5', t:'A new (provider-type, provider-type) edge appears for the first time.' },
+    { id:'resource_removed',             w:'0.5', t:'A node was removed (capped at 2 reasons).' },
+  ];
+  const wc = w => {
+    const v = parseFloat(w);
+    if (v >= 4) return { bg:'rgba(248,81,73,0.07)',  bd:'rgba(248,81,73,0.22)',  tx:'#f85149' };
+    if (v >= 3) return { bg:'rgba(210,153,34,0.07)', bd:'rgba(210,153,34,0.22)', tx:'#d29922' };
+    if (v >= 2) return { bg:'rgba(0,232,135,0.06)',  bd:'rgba(0,232,135,0.18)',  tx:'#00e887' };
+    return             { bg:'rgba(80,80,80,0.08)',   bd:'rgba(80,80,80,0.25)',   tx:'#777'    };
+  };
+  return (
+    <section id="defaults" style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Built-in coverage</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:48}}>Ships with opinionated defaults</h2>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}} className="two-col-stack">
+          <div style={{background:'#0a0a0a',padding:'28px 24px'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#ededed',marginBottom:4}}>45 AWS resource types</div>
+            <div style={{fontSize:12,color:'#555',marginBottom:20,fontFamily:'"JetBrains Mono",monospace'}}>infrastructure graph nodes</div>
+            <div style={{display:'flex',flexDirection:'column',gap:18}}>
+              {resourceGroups.map(g=>(
+                <div key={g.label}>
+                  <div style={{fontSize:11,color:'#666',fontFamily:'"JetBrains Mono",monospace',marginBottom:8,letterSpacing:'0.04em',textTransform:'uppercase'}}>{g.label}</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                    {g.items.map(r=>(
+                      <span key={r} style={{padding:'3px 8px',border:'1px solid #1f1f1f',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#888',background:'#0c0c0c',cursor:'default',transition:'all 0.15s'}}
+                            onMouseEnter={e=>{e.currentTarget.style.borderColor='#2a2a2a';e.currentTarget.style.color='#cfcfcf';}}
+                            onMouseLeave={e=>{e.currentTarget.style.borderColor='#1f1f1f';e.currentTarget.style.color='#888';}}>
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{background:'#0a0a0a',padding:'28px 24px',borderLeft:'1px solid #1a1a1a'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#ededed',marginBottom:4}}>18 risk rules</div>
+            <div style={{fontSize:12,color:'#555',marginBottom:20,fontFamily:'"JetBrains Mono",monospace'}}>weighted scoring, explainable</div>
+            <div style={{display:'flex',flexDirection:'column',gap:0}}>
+              {rules.map((r,i)=>{ const c=wc(r.w); return (
+                <div key={r.id} style={{display:'flex',alignItems:'flex-start',gap:12,padding:'9px 0',borderBottom:i<rules.length-1?'1px solid #1e1e1e':'none'}}>
+                  <span style={{padding:'2px 6px',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:10,fontWeight:600,background:c.bg,border:`1px solid ${c.bd}`,color:c.tx,flexShrink:0,marginTop:1}}>{r.w}</span>
+                  <div>
+                    <div style={{fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#bbb',marginBottom:2}}>{r.id}</div>
+                    <div style={{fontSize:11,color:'#666',lineHeight:1.5}}>{r.t}</div>
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { Defaults });
+</script>
+
+<!-- ── V1.3 HIGHLIGHTS ─────────────────────────────────────────────── -->
+<script type="text/babel">
+function Highlights() {
+  const items = [
+    { tag:'v1.3', title:'Library mode for module authors', body:'Resources gated behind count = var.create ? 1 : 0 render as conditional phantoms in the diagram. Per-resource rules short-circuit on them — no false positives on conditional gates.' },
+    { tag:'v1.2', title:'Self-contained HTML report',     body:'Every run produces a report.html with no JavaScript, no CDN, no remote fonts. Open it in an air-gapped browser and see the full review with severity badges, reasons, suppressions, the Mermaid diagram, and a SHA-256 manifest.' },
+    { tag:'v1.2', title:'Baseline anomaly detection',     body:'Optional .architex/baseline.json records the kinds of resources your repo has ever contained — no raw HCL, no names. Novel additions surface as low-weight signals that layer on top of the existing rules.' },
+  ];
+  return (
+    <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>What's new</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:8}}>Built for module authors and regulated teams</h2>
+        <p style={{fontSize:14,color:'#888',marginBottom:48,maxWidth:620}}>v1.3 adds EKS, Auto Scaling, and RDS-groups support, plus library-mode parsing and conditional-phantom rendering. Earlier releases shipped the depth and air-gapped review machinery that makes any of this trustworthy.</p>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}}>
+          {items.map((p,i)=>(
+            <div key={i} style={{background:'#0a0a0a',padding:'28px 24px',transition:'background 0.15s'}}
+                 onMouseEnter={e=>e.currentTarget.style.background='#0e0e0e'} onMouseLeave={e=>e.currentTarget.style.background='#0a0a0a'}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                <span style={{padding:'2px 8px',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:10,background:'rgba(0,232,135,0.07)',border:'1px solid rgba(0,232,135,0.22)',color:ACCENT,letterSpacing:'0.04em'}}>{p.tag}</span>
+              </div>
+              <div style={{fontSize:15,fontWeight:600,color:'#ededed',marginBottom:10,letterSpacing:'-0.02em'}}>{p.title}</div>
+              <div style={{fontSize:13,lineHeight:1.65,color:'#999'}}>{p.body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { Highlights });
+</script>
+
+<!-- ── TRUST + ADOPTION + COMPARE ────────────────────────────────── -->
+<script type="text/babel">
+function Trust() {
+  const local = ['Terraform source (.tf files)','Variable files (.tfvars)','Secrets and environment variables','Terraform plan / state files','Provider credentials','Code comments and identifiers'];
+  return (
+    <section id="trust" style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Trust model</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:48}}>Zero raw code leaves your runner</h2>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}} className="two-col-stack">
+          <div style={{background:'#0a0a0a',padding:'28px 24px'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#ededed',marginBottom:20}}>Stays local — always</div>
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {local.map(item=>(
+                <div key={item} style={{display:'flex',alignItems:'center',gap:10}}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="#1f1f1f"/><path d="M4 7l2 2 4-4" stroke="#00e887" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <span style={{fontSize:13,color:'#888'}}>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{background:'#0a0a0a',padding:'28px 24px',borderLeft:'1px solid #1a1a1a'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'#ededed',marginBottom:20}}>The only network call</div>
+            <div style={{padding:'16px 18px',border:'1px solid #1f1f1f',borderRadius:4,background:'#0c0c0c',marginBottom:14}}>
+              <code style={{fontFamily:'"JetBrains Mono",monospace',fontSize:12,color:'#79c0ff'}}>architex comment</code>
+              <p style={{fontSize:13,lineHeight:1.7,color:'#999',margin:'10px 0 0'}}>
+                Posts rendered Markdown to the GitHub REST API using the existing{' '}
+                <code style={{fontFamily:'"JetBrains Mono",monospace',fontSize:12,color:'#a5d6ff'}}>GITHUB_TOKEN</code>. That's it. No external service. No telemetry endpoint. No data collection.
+              </p>
+            </div>
+            <p style={{fontSize:12,color:'#888',lineHeight:1.65}}>An auditable SHA-256 manifest bundle — including a self-contained <code style={{fontFamily:'"JetBrains Mono",monospace',color:'#a5d6ff'}}>report.html</code> — is uploaded as a workflow artifact on every run.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Adoption() {
+  const phases = [
+    { n:'01', name:'Visibility',           mode:'advisory', desc:'PR comments only, no blocking. Build trust, tune noise. Start here — always.', c:'#00e887', rgb:'0,232,135' },
+    { n:'02', name:'Advisory governance',  mode:'warn',     desc:'Warnings, soft thresholds, evidence collection. Introduce policy gradually.', c:'#d29922', rgb:'210,153,34' },
+    { n:'03', name:'Enforced governance',  mode:'blocking', desc:'CI blocking for critical violations. Enforce hard thresholds once policy is stable.', c:'#f85149', rgb:'248,81,73' },
+  ];
+  return (
+    <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Rollout</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:48}}>Adopt on your terms</h2>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}}>
+          {phases.map((p,i)=>(
+            <div key={i} style={{background:'#0a0a0a',padding:'28px 24px',borderRight:i<2?'1px solid #1a1a1a':'none',transition:'background 0.15s'}}
+                 onMouseEnter={e=>e.currentTarget.style.background='#0e0e0e'} onMouseLeave={e=>e.currentTarget.style.background='#0a0a0a'}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                <span style={{fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#2a2a2a'}}>{p.n}</span>
+                <span style={{padding:'2px 8px',borderRadius:3,fontFamily:'"JetBrains Mono",monospace',fontSize:10,background:`rgba(${p.rgb},0.07)`,border:`1px solid rgba(${p.rgb},0.22)`,color:p.c}}>{p.mode}</span>
+              </div>
+              <div style={{fontSize:15,fontWeight:600,color:'#ededed',marginBottom:10,letterSpacing:'-0.02em'}}>{p.name}</div>
+              <div style={{fontSize:13,lineHeight:1.65,color:'#999'}}>{p.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Compare() {
+  const rows = [
+    { tool:'SAST',           what:'Code vulnerabilities',            topo:false, pre:true,  runner:false },
+    { tool:'IaC linters',    what:'Resource misconfig',              topo:false, pre:true,  runner:true  },
+    { tool:'CSPM / CNAPP',   what:'Runtime drift & posture',         topo:false, pre:false, runner:false },
+    { tool:'Policy engines', what:'Config assertion (Rego / Cedar)', topo:false, pre:true,  runner:true  },
+    { tool:'ArchiteX',       what:'Architectural topology change',   topo:true,  pre:true,  runner:true,  accent:true },
+  ];
+  return (
+    <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Positioning</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:48}}>Where ArchiteX fits</h2>
+        <div style={{border:'1px solid #1f1f1f',borderRadius:6,overflow:'hidden'}}>
+          <div style={{display:'grid',gridTemplateColumns:'160px 1fr repeat(3,90px)',padding:'10px 20px 10px 22px',background:'#0c0c0c',borderBottom:'1px solid #1f1f1f'}}>
+            {['Tool','What it answers','Topology-aware','Pre-merge','On-runner'].map(h=>(
+              <span key={h} style={{fontSize:11,color:'#666',fontFamily:'"JetBrains Mono",monospace',textAlign:h==='Tool'||h==='What it answers'?'left':'center'}}>{h}</span>
+            ))}
+          </div>
+          {rows.map((r,i)=>(
+            <div key={i} style={{display:'grid',gridTemplateColumns:'160px 1fr repeat(3,90px)',padding:'12px 20px',borderBottom:i<rows.length-1?'1px solid #141414':'none',background:r.accent?'rgba(0,232,135,0.04)':'#0a0a0a',borderLeft:r.accent?'2px solid #00e887':'2px solid transparent',transition:'background 0.15s',alignItems:'center',paddingLeft:r.accent?18:20}}
+                 onMouseEnter={e=>{ if(!r.accent) e.currentTarget.style.background='#0d0d0d'; }}
+                 onMouseLeave={e=>{ e.currentTarget.style.background=r.accent?'rgba(0,232,135,0.02)':'#0a0a0a'; }}>
+              <span style={{fontSize:13,fontFamily:'"JetBrains Mono",monospace',color:r.accent?'#00e887':'#aaa',fontWeight:r.accent?600:400}}>{r.tool}</span>
+              <span style={{fontSize:13,color:'#888',paddingRight:16}}>{r.what}</span>
+              {[r.topo,r.pre,r.runner].map((v,j)=>(
+                <span key={j} style={{textAlign:'center',fontFamily:'"JetBrains Mono",monospace',fontSize:13,color:v?(r.accent?'#00e887':'#55a870'):'#444'}}>{v?'✓':'—'}</span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { Trust, Adoption, Compare });
+</script>
+
+<!-- ── CTA + FOOTER ────────────────────────────────────────────────── -->
+<script type="text/babel">
+const { IconCopy: Copy, IconCheck: CheckIcon, IconGithub: GH } = window;
+
+function FinalCTA() {
+  const [copied, setCopied] = React.useState(false);
+  const YAML = `name: ArchiteX\non:\n  pull_request:\npermissions:\n  contents: read\n  pull-requests: write\njobs:\n  architex:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: danilotrix86/ArchiteX@v1.3.1\n        with:\n          terraform-dir: infra`;
+  const copy = () => { navigator.clipboard.writeText(YAML).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); }); };
+  return (
+    <section id="install" style={{padding:'96px 24px',borderTop:'1px solid #222',textAlign:'center'}}>
+      <div style={{maxWidth:480,margin:'0 auto'}}>
+        <h2 style={{fontSize:'clamp(28px,4vw,44px)',fontWeight:700,letterSpacing:'-0.04em',color:'#ededed',marginBottom:12}}>Free. Open source. MIT.</h2>
+        <p style={{fontSize:15,color:'#666',marginBottom:32,lineHeight:1.65}}>No SaaS. No telemetry. No paid tier. No account.</p>
+        <div style={{border:'1px solid #1f1f1f',borderRadius:5,overflow:'hidden',background:'#0c0c0c',marginBottom:10,textAlign:'left'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 14px',borderBottom:'1px solid #1a1a1a',background:'#0a0a0a'}}>
+            <span style={{fontFamily:'"JetBrains Mono",monospace',fontSize:11,color:'#444'}}>.github/workflows/architex.yml</span>
+            <button onClick={copy} style={{display:'flex',alignItems:'center',gap:5,padding:'3px 9px',border:'1px solid #1f1f1f',borderRadius:3,background:'transparent',color:copied?ACCENT:'#555',fontSize:11,cursor:'pointer',fontFamily:'"JetBrains Mono",monospace',transition:'all 0.15s'}}
+                    onMouseEnter={e=>e.currentTarget.style.borderColor='#2a2a2a'} onMouseLeave={e=>e.currentTarget.style.borderColor='#1f1f1f'}>
+              {copied ? <CheckIcon size={11} col={ACCENT}/> : <Copy size={11} col="currentColor"/>}
+              {copied ? 'copied' : 'copy'}
+            </button>
+          </div>
+          <pre style={{margin:0,padding:'14px 20px',fontFamily:'"JetBrains Mono",monospace',fontSize:12,lineHeight:1.7,overflowX:'auto',textAlign:'left'}}>
+            <span style={{color:'#555'}}>      - </span><span style={{color:'#79c0ff'}}>uses</span><span style={{color:'#555'}}>: </span><span style={{color:'#a5d6ff'}}>danilotrix86/ArchiteX</span><span style={{color:ACCENT}}>@v1.3.1</span>{'\n'}
+            <span style={{color:'#555'}}>        </span><span style={{color:'#79c0ff'}}>with</span><span style={{color:'#555'}}>:</span>{'\n'}
+            <span style={{color:'#555'}}>          </span><span style={{color:'#79c0ff'}}>terraform-dir</span><span style={{color:'#555'}}>: </span><span style={{color:'#a5d6ff'}}>infra</span>
+          </pre>
+        </div>
+        <p style={{fontSize:12,color:'#555',marginBottom:28,textAlign:'left'}}>
+          Add <code style={{fontFamily:'"JetBrains Mono",monospace',padding:'1px 5px',border:'1px solid #1f1f1f',borderRadius:3,color:'#777'}}>mode: blocking</code> to fail CI on critical violations.
+        </p>
+        <a href={REPO_URL} target="_blank" rel="noopener"
+           style={{display:'inline-flex',alignItems:'center',gap:8,padding:'12px 24px',background:ACCENT,color:'#000',fontSize:14,fontWeight:600,borderRadius:4,letterSpacing:'-0.01em'}}>
+          <GH size={15} col="#000"/> Install from GitHub
+        </a>
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer style={{borderTop:'1px solid #222',padding:'20px 24px'}}>
+      <div style={{maxWidth:1120,margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:16}}>
+        <div>
+          <span style={{fontWeight:700,fontSize:13,color:'#2a2a2a',letterSpacing:'-0.02em'}}>ArchiteX <span style={{fontWeight:400,marginLeft:8,color:'#1f1f1f'}}>© 2026</span></span>
+          <div style={{fontSize:11,color:'#222',marginTop:3}}>Built by <a href="https://github.com/danilotrix86" target="_blank" rel="noopener" style={{color:'#333',textDecoration:'none'}} onMouseEnter={e=>e.target.style.color='#666'} onMouseLeave={e=>e.target.style.color='#333'}>@danilotrix86</a></div>
+        </div>
+        <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+          {[
+            {l:'Docs',         h:'https://github.com/danilotrix86/ArchiteX/blob/main/docs/github-action.md'},
+            {l:'Changelog',    h:'https://github.com/danilotrix86/ArchiteX/blob/main/CHANGELOG.md'},
+            {l:'Contributing', h:'https://github.com/danilotrix86/ArchiteX/blob/main/CONTRIBUTING.md'},
+            {l:'License',      h:'https://github.com/danilotrix86/ArchiteX/blob/main/LICENSE'},
+          ].map(({l,h})=>(
+            <a key={l} href={h} target="_blank" rel="noopener" style={{fontSize:12,color:'#555',transition:'color 0.15s'}}
+               onMouseEnter={e=>e.target.style.color='#888'} onMouseLeave={e=>e.target.style.color='#555'}>{l}</a>
+          ))}
+        </div>
+        <a href={REPO_URL} target="_blank" rel="noopener"
+           style={{color:'#555',transition:'color 0.15s'}}
+           onMouseEnter={e=>e.currentTarget.style.color='#888'} onMouseLeave={e=>e.currentTarget.style.color='#555'}>
+          <GH size={15} col='currentColor'/>
+        </a>
+      </div>
+    </footer>
+  );
+}
+Object.assign(window, { FinalCTA, Footer });
+</script>
+
+<!-- ── FAQ + ROADMAP ──────────────────────────────────────────────── -->
+<script type="text/babel">
+function FAQ() {
+  const [open, setOpen] = React.useState(null);
+  const items = [
+    { q:'Does it support Terraform modules?',
+      a:'Yes. The v1.2 parser handles modules, count, for_each, and dynamic blocks. v1.3 adds a dedicated library mode for module-author repos: resources gated behind count = var.create ? 1 : 0 render as conditional phantoms in the diagram and per-resource rules short-circuit on them.' },
+    { q:'AWS only?',
+      a:'AWS in v1.x — 45 resource types as of v1.3. Multi-provider (Azure, GCP) is on the roadmap. Unsupported resource types emit a warning and reduce the confidence score; they never cause failures.' },
+    { q:'How is this different from Snyk IaC / Checkov / tfsec?',
+      a:'Those find resource-level misconfigurations (open ports, missing encryption). ArchiteX finds architectural changes — new public entry point, expanded blast radius, crossed trust boundary — that resource-level scanners structurally cannot see. Run them together: they are complementary, not overlapping.' },
+    { q:'Can I customize the rules?',
+      a:'Yes. Drop a .architex.yml at the root of your Terraform directory to override weights, disable rules, adjust warn/fail thresholds, ignore paths, or add suppressions with optional expiry dates. An absent file reproduces v1.2 default behavior bit-for-bit.' },
+    { q:'Does it call out to any external service?',
+      a:'Only the PR comment, posted to the GitHub REST API using the workflow\u2019s existing GITHUB_TOKEN. No external service. No telemetry. No data leaves your runner.' },
+    { q:'Can my team audit the full computation?',
+      a:'Yes. Every run uploads a SHA-256-signed bundle (diagram.mmd, summary.md, score.json, egress.json, report.html, manifest.json). The report.html is a single self-contained page — no JavaScript, no CDN, no remote fonts — so you can open it in an air-gapped browser and verify exactly what was computed and why.' },
+  ];
+  return (
+    <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>FAQ</SectionLabel>
+        <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:40}}>Common questions</h2>
+        <div style={{display:'flex',flexDirection:'column',gap:0,border:'1px solid #1f1f1f',borderRadius:6,overflow:'hidden'}}>
+          {items.map((item,i)=>(
+            <div key={i} style={{borderBottom:i<items.length-1?'1px solid #1f1f1f':'none'}}>
+              <button onClick={()=>setOpen(open===i?null:i)}
+                style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 20px',background:open===i?'#0e0e0e':'#0a0a0a',border:'none',cursor:'pointer',textAlign:'left',transition:'background 0.15s'}}
+                onMouseEnter={e=>e.currentTarget.style.background='#0e0e0e'} onMouseLeave={e=>e.currentTarget.style.background=open===i?'#0e0e0e':'#0a0a0a'}>
+                <span style={{fontSize:14,fontWeight:500,color:'#ededed',letterSpacing:'-0.01em'}}>{item.q}</span>
+                <span style={{color:'#444',fontSize:16,lineHeight:1,flexShrink:0,marginLeft:16,transform:open===i?'rotate(45deg)':'rotate(0deg)',transition:'transform 0.15s'}}>+</span>
+              </button>
+              {open===i && (
+                <div style={{padding:'0 20px 16px',background:'#0e0e0e'}}>
+                  <p style={{fontSize:13,lineHeight:1.7,color:'#888',margin:0}}>{item.a}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Roadmap() {
+  const items = [
+    { label:'Multi-provider support',     detail:'Azure & GCP first. IaC-agnostic graph construction; Terraform is the v1 scope.' },
+    { label:'GitLab & Bitbucket adapters',detail:'Same on-runner architecture, different VCS API targets.' },
+    { label:'Non-Terraform IaC',          detail:'Pulumi, CDK, Helm. The graph stays the contract; the front-end parser changes.' },
+  ];
+  return (
+    <section style={{padding:'60px 24px',borderTop:'1px solid #222'}}>
+      <div style={{maxWidth:1120,margin:'0 auto'}}>
+        <SectionLabel>Roadmap</SectionLabel>
+        <h2 style={{fontSize:'clamp(20px,2.5vw,30px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:32}}>What's next</h2>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:1,background:'#1f1f1f',borderRadius:6,overflow:'hidden',border:'1px solid #1f1f1f'}}>
+          {items.map((item,i)=>(
+            <div key={i} style={{background:'#0a0a0a',padding:'20px 22px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                <span style={{width:6,height:6,borderRadius:'50%',background:'#2a2a2a',flexShrink:0}}/>
+                <span style={{fontSize:14,fontWeight:600,color:'#ccc',letterSpacing:'-0.01em'}}>{item.label}</span>
+              </div>
+              <p style={{fontSize:12,color:'#666',margin:0,lineHeight:1.6,paddingLeft:14}}>{item.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+Object.assign(window, { FAQ, Roadmap });
+</script>
+
+<!-- ── APP ───────────────────────────────────────────────────────── -->
+<script type="text/babel">
+function App() {
+  return (
+    <div style={{minHeight:'100vh',background:'#0a0a0a',color:'#ededed',fontFamily:"'Inter',sans-serif"}}>
+      <Nav/>
+      <main>
+        <Hero/>
+        <PRComment/>
+        <Problems/>
+        <Pipeline/>
+        <Defaults/>
+        <Highlights/>
+        <Trust/>
+        <Adoption/>
+        <Compare/>
+        <FAQ/>
+        <Roadmap/>
+        <FinalCTA/>
+      </main>
+      <Footer/>
+    </div>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
 </body>
 </html>
