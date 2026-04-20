@@ -41,6 +41,13 @@ type parseContext struct {
 	// the literal ARN string captured from the corresponding data block.
 	// Empty when the directory has no resolvable data blocks.
 	dataPolicyARNs map[string]string
+
+	// libraryMode is the v1.3 PR2 toggle. When true, the count-expansion
+	// path materializes ONE phantom resource (marked
+	// `Attributes["conditional"] = true`) for every
+	// `count = var.X ? <int> : 0` gate instead of warn-and-skipping.
+	// Default false preserves v1.2 behavior bit-identically.
+	libraryMode bool
 }
 
 // newParseContext returns a context with no resolved data sources. It is

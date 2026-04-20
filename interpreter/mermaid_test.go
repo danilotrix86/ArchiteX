@@ -53,6 +53,27 @@ func TestRenderMermaid_EmptyDelta(t *testing.T) {
 	}
 }
 
+// TestRenderMermaid_ConditionalNode_GetsQuestionMarkPrefix verifies the
+// v1.3 PR2 (library-mode) rendering contract: nodes whose Attributes
+// carry `conditional = true` MUST be labelled with a leading `? ` so a
+// reviewer can never confuse a library-mode phantom with a definite
+// resource. The marker (`+`/`-`/`~`) still wins position one; `? ` lands
+// between the marker and the abstract type.
+func TestRenderMermaid_ConditionalNode_GetsQuestionMarkPrefix(t *testing.T) {
+	d := emptyDelta()
+	d.AddedNodes = append(d.AddedNodes, models.Node{
+		ID:           "aws_s3_bucket.data",
+		Type:         "data",
+		ProviderType: "aws_s3_bucket",
+		Attributes:   map[string]any{"conditional": true},
+	})
+	out := RenderMermaid(d)
+	want := `aws_s3_bucket_data["+ ? data: aws_s3_bucket.data"]:::added`
+	if !strings.Contains(out, want) {
+		t.Errorf("expected diagram to contain %q\n--- diagram ---\n%s", want, out)
+	}
+}
+
 func TestRenderMermaid_RemovedEdgeUsesDashedArrow(t *testing.T) {
 	d := emptyDelta()
 	d.RemovedEdges = append(d.RemovedEdges, models.Edge{

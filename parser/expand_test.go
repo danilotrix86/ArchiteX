@@ -369,7 +369,7 @@ resource "aws_vpc" "deep" { cidr_block = "10.0.0.0/16" }
 // will follow -- catching this at the parser layer is faster.
 func TestParseDir_RegressionV1Fixtures(t *testing.T) {
 	cases := []struct {
-		dir         string
+		dir          string
 		minResources int
 	}{
 		{"../testdata/base", 5},

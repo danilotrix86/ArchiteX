@@ -41,6 +41,9 @@ func evaluateCloudFrontNoWAF(d delta.Delta) []RiskReason {
 		if n.ProviderType != "aws_cloudfront_distribution" {
 			continue
 		}
+		if isConditionalNode(n.Attributes) {
+			continue
+		}
 		if v, ok := n.Attributes["web_acl_id"]; ok {
 			if s, ok := v.(string); ok && s != "" {
 				continue
@@ -78,6 +81,9 @@ func evaluateEBSUnencrypted(d delta.Delta) []RiskReason {
 	var reasons []RiskReason
 	for _, n := range d.AddedNodes {
 		if n.ProviderType != "aws_ebs_volume" {
+			continue
+		}
+		if isConditionalNode(n.Attributes) {
 			continue
 		}
 		v, ok := n.Attributes["encrypted"]
@@ -121,6 +127,9 @@ func evaluateMessagingTopicPublic(d delta.Delta) []RiskReason {
 	var reasons []RiskReason
 	for _, n := range d.AddedNodes {
 		if n.ProviderType != "aws_sns_topic_policy" && n.ProviderType != "aws_sqs_queue_policy" {
+			continue
+		}
+		if isConditionalNode(n.Attributes) {
 			continue
 		}
 		raw, ok := n.Attributes["policy"].(string)
@@ -243,6 +252,9 @@ func evaluateNACLAllowAllIngress(d delta.Delta) []RiskReason {
 	var reasons []RiskReason
 	for _, n := range d.AddedNodes {
 		if n.ProviderType != "aws_network_acl_rule" {
+			continue
+		}
+		if isConditionalNode(n.Attributes) {
 			continue
 		}
 		cidr, _ := n.Attributes["cidr_block"].(string)

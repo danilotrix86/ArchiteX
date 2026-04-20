@@ -136,7 +136,7 @@ func TestFirstTimeEdgePair_RequiresKnownEndpoints(t *testing.T) {
 			// duplicate pair -- should NOT double-fire
 			{From: "aws_kms_alias.b", To: "aws_kms_key.k2", Type: "applies_to"},
 			{From: "aws_lb.web", To: "aws_vpc.main", Type: "deployed_in"}, // known
-			{From: "ghost.x", To: "aws_vpc.main", Type: "x"},               // unknown endpoint -> skip
+			{From: "ghost.x", To: "aws_vpc.main", Type: "x"},              // unknown endpoint -> skip
 		},
 	}
 	// Note: aws_kms_alias.b / aws_kms_key.k2 are not in the node table; the
@@ -190,9 +190,9 @@ func TestEvaluateWithBaseline_StackingWithExistingRules(t *testing.T) {
 	r := EvaluateWithBaseline(d, nil, bl, time.Time{})
 
 	want := map[string]bool{
-		"new_entry_point":           false,
-		"first_time_resource_type":  false,
-		"first_time_abstract_type":  false,
+		"new_entry_point":          false,
+		"first_time_resource_type": false,
+		"first_time_abstract_type": false,
 	}
 	for _, reason := range r.Reasons {
 		if _, ok := want[reason.RuleID]; ok {

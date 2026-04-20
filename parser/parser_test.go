@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"architex/config"
 	"architex/models"
 )
 
@@ -385,6 +386,75 @@ func TestParseDir_Tranche2_LiteralAttributesPromoted(t *testing.T) {
 	}
 }
 
+// TestParseDir_Tranche3Resources_AllRecognized verifies that every Phase 8
+// (v1.3 "Coverage tranche 3") resource type is recognized by the parser
+// without emitting `unsupported_resource` warnings. Mirrors the Phase 6 /
+// Phase 7 PR4 equivalents.
+func TestParseDir_Tranche3Resources_AllRecognized(t *testing.T) {
+	resources, warnings, err := ParseDir("../testdata/tranche3_resources")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if w.Category == models.WarnUnsupportedResource {
+			t.Errorf("unexpected unsupported_resource warning: %s", w.Message)
+		}
+	}
+
+	expected := []string{
+		"aws_eks_cluster.main",
+		"aws_eks_node_group.default",
+		"aws_eks_addon.vpc_cni",
+		"aws_eks_fargate_profile.default",
+		"aws_eks_identity_provider_config.oidc",
+		"aws_db_subnet_group.main",
+		"aws_db_parameter_group.main",
+		"aws_db_option_group.main",
+		"aws_launch_template.app",
+		"aws_autoscaling_group.app",
+		"aws_autoscaling_policy.scale_out",
+	}
+	for _, id := range expected {
+		if findResource(resources, id) == nil {
+			t.Errorf("tranche-3 resource %s was not parsed", id)
+		}
+	}
+}
+
+// TestParseDir_Tranche3_LiteralAttributesPromoted spot-checks that the
+// tranche-3 rules' input attributes survive the parser round-trip:
+//   - aws_eks_cluster.vpc_config.endpoint_public_access (nested-block bool)
+//   - aws_autoscaling_group.{max_size, min_size} (number literals)
+func TestParseDir_Tranche3_LiteralAttributesPromoted(t *testing.T) {
+	resources, _, err := ParseDir("../testdata/tranche3_resources")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cluster := findResource(resources, "aws_eks_cluster.main")
+	if cluster == nil {
+		t.Fatal("aws_eks_cluster.main not parsed")
+	}
+	got, ok := cluster.Attributes["vpc_config.endpoint_public_access"].(bool)
+	if !ok || !got {
+		t.Errorf("expected vpc_config.endpoint_public_access=true, got %v (%T)",
+			cluster.Attributes["vpc_config.endpoint_public_access"],
+			cluster.Attributes["vpc_config.endpoint_public_access"])
+	}
+
+	asg := findResource(resources, "aws_autoscaling_group.app")
+	if asg == nil {
+		t.Fatal("aws_autoscaling_group.app not parsed")
+	}
+	if got, ok := asg.Attributes["max_size"].(float64); !ok || got != 200 {
+		t.Errorf("expected max_size=200, got %v (%T)", asg.Attributes["max_size"], asg.Attributes["max_size"])
+	}
+	if got, ok := asg.Attributes["min_size"].(float64); !ok || got != 0 {
+		t.Errorf("expected min_size=0, got %v (%T)", asg.Attributes["min_size"], asg.Attributes["min_size"])
+	}
+}
+
 // TestParseDir_Phase6_PolicyArnLiteralCaptured ensures the parser preserves
 // the literal `policy_arn` string on aws_iam_role_policy_attachment, which
 // the Phase 6 iam_admin_policy_attached rule will key off.
@@ -452,4 +522,189 @@ resource "aws_subnet" "web" {
 	if instance.References[0].TargetID != "aws_subnet.web" {
 		t.Errorf("expected reference to aws_subnet.web, got %s", instance.References[0].TargetID)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 PR2 (v1.3) -- library mode tests.
+//
+// Library mode materializes one phantom resource per `count = var.X ? N : 0`
+// (and equivalent) gate. The phantom carries Attributes["conditional"]=true
+// and is otherwise indistinguishable from a literal-count instance from the
+// parser's perspective. The risk-rule guard lives in risk/rules_v13.go.
+// ---------------------------------------------------------------------------
+
+func libraryModeCfg() *config.Config {
+	return &config.Config{Parser: config.ParserConfig{Mode: config.ParserModeLibrary}}
+}
+
+// TestParseDir_LibraryMode_VarConditionalMaterializes verifies that the
+// canonical `count = var.X ? 1 : 0` shape produces exactly one phantom
+// resource marked `conditional = true`. Without library mode it must still
+// warn-and-skip (the v1.2 contract). Both branches are tested in one go.
+func TestParseDir_LibraryMode_VarConditionalMaterializes(t *testing.T) {
+	tf := `
+variable "create" {
+  type    = bool
+  default = true
+}
+
+resource "aws_s3_bucket" "data" {
+  count  = var.create ? 1 : 0
+  bucket = "x"
+}
+`
+	dir := writeTempTF(t, tf)
+
+	resources, warns, err := ParseDir(dir)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(resources) != 0 {
+		t.Errorf("consumer mode should warn-and-skip; got %d resources", len(resources))
+	}
+	if !hasUnsupportedConstructWarning(warns, "non-literal expression") {
+		t.Errorf("consumer mode should emit unsupported_construct warning; got %v", warns)
+	}
+
+	resources, _, err = ParseDirWith(dir, libraryModeCfg())
+	if err != nil {
+		t.Fatalf("ParseDirWith library: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("library mode should materialize 1 phantom; got %d", len(resources))
+	}
+	bucket := resources[0]
+	if bucket.ID != "aws_s3_bucket.data" {
+		t.Errorf("phantom ID = %q, want aws_s3_bucket.data", bucket.ID)
+	}
+	if v, ok := bucket.Attributes["conditional"].(bool); !ok || !v {
+		t.Errorf("phantom missing Attributes[\"conditional\"]=true; got %v", bucket.Attributes["conditional"])
+	}
+	// Non-conditional attributes still flow through.
+	if got := bucket.Attributes["bucket"]; got != "x" {
+		t.Errorf("phantom bucket attr = %v, want \"x\"", got)
+	}
+}
+
+// TestParseDir_LibraryMode_LocalConditional verifies the local.X variant.
+func TestParseDir_LibraryMode_LocalConditional(t *testing.T) {
+	tf := `
+locals { enable = true }
+
+resource "aws_iam_role" "task" {
+  count              = local.enable ? 1 : 0
+  name               = "x"
+  assume_role_policy = "{}"
+}
+`
+	dir := writeTempTF(t, tf)
+	resources, _, err := ParseDirWith(dir, libraryModeCfg())
+	if err != nil {
+		t.Fatalf("ParseDirWith: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 phantom; got %d", len(resources))
+	}
+	if v, ok := resources[0].Attributes["conditional"].(bool); !ok || !v {
+		t.Errorf("phantom missing conditional=true")
+	}
+}
+
+// TestParseDir_LibraryMode_LengthGate verifies the
+// `length(var.X) > 0 ? 1 : 0` shape. This is the second canonical
+// "create-or-not" gate found in community modules.
+func TestParseDir_LibraryMode_LengthGate(t *testing.T) {
+	tf := `
+variable "subnets" {
+  type    = list(string)
+  default = []
+}
+
+resource "aws_db_subnet_group" "shared" {
+  count       = length(var.subnets) > 0 ? 1 : 0
+  name        = "x"
+  subnet_ids  = var.subnets
+  description = "y"
+}
+`
+	dir := writeTempTF(t, tf)
+	resources, _, err := ParseDirWith(dir, libraryModeCfg())
+	if err != nil {
+		t.Fatalf("ParseDirWith: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 phantom; got %d", len(resources))
+	}
+	if v, ok := resources[0].Attributes["conditional"].(bool); !ok || !v {
+		t.Errorf("phantom missing conditional=true")
+	}
+}
+
+// TestParseDir_LibraryMode_NonGateStillSkips verifies that library mode is
+// scoped: non-conditional unresolved expressions still warn-and-skip. We
+// must not silently invent resources for things like
+// `count = aws_subnet.web.id == "x" ? 1 : 0` (resource-driven gate) or
+// `count = var.replicas` (raw variable).
+func TestParseDir_LibraryMode_NonGateStillSkips(t *testing.T) {
+	cases := []struct {
+		name string
+		tf   string
+	}{
+		{
+			name: "raw_variable_count",
+			tf: `
+variable "replicas" {
+  type    = number
+  default = 3
+}
+
+resource "aws_instance" "x" {
+  count         = var.replicas
+  ami           = "ami-x"
+  instance_type = "t3.micro"
+}`,
+		},
+		{
+			name: "resource_driven_gate",
+			tf: `
+resource "aws_subnet" "web" {
+  vpc_id     = "x"
+  cidr_block = "10.0.1.0/24"
+}
+
+resource "aws_instance" "x" {
+  count         = aws_subnet.web.id == "y" ? 1 : 0
+  ami           = "ami-x"
+  instance_type = "t3.micro"
+}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeTempTF(t, tc.tf)
+			resources, warns, err := ParseDirWith(dir, libraryModeCfg())
+			if err != nil {
+				t.Fatalf("ParseDirWith: %v", err)
+			}
+			for _, r := range resources {
+				if v, ok := r.Attributes["conditional"].(bool); ok && v {
+					t.Errorf("library mode invented a phantom for non-gate expression: %s", r.ID)
+				}
+			}
+			if !hasUnsupportedConstructWarning(warns, "non-literal expression") {
+				t.Errorf("expected unsupported_construct warning for %s; got %v", tc.name, warns)
+			}
+		})
+	}
+}
+
+// hasUnsupportedConstructWarning returns true when the warnings slice
+// contains an unsupported_construct warning whose Message contains substr.
+func hasUnsupportedConstructWarning(warns []models.Warning, substr string) bool {
+	for _, w := range warns {
+		if w.Category == models.WarnUnsupportedConstruct && strings.Contains(w.Message, substr) {
+			return true
+		}
+	}
+	return false
 }

@@ -454,6 +454,191 @@ func TestBuild_Tranche2_DerivedAttributesAndEdges(t *testing.T) {
 	}
 }
 
+// TestBuild_Tranche3_DerivedAttributesAndEdges locks in the Phase 8
+// (v1.3) abstract types, public-attribute defaults, and new edge-type
+// pairs introduced by the tranche-3 resource expansion.
+func TestBuild_Tranche3_DerivedAttributesAndEdges(t *testing.T) {
+	resources := []models.RawResource{
+		{Type: "aws_vpc", Name: "main", ID: "aws_vpc.main"},
+		{
+			Type: "aws_subnet", Name: "main", ID: "aws_subnet.main",
+			References: []models.Reference{{SourceAttr: "vpc_id", TargetID: "aws_vpc.main"}},
+		},
+		{Type: "aws_iam_role", Name: "cluster", ID: "aws_iam_role.cluster"},
+		{Type: "aws_iam_role", Name: "nodes", ID: "aws_iam_role.nodes"},
+
+		// EKS family.
+		{
+			Type: "aws_eks_cluster", Name: "main", ID: "aws_eks_cluster.main",
+			Attributes: map[string]any{
+				"vpc_config.endpoint_public_access": true,
+				"enabled_cluster_log_types":         []any{"api", "audit"},
+			},
+			References: []models.Reference{
+				{SourceAttr: "role_arn", TargetID: "aws_iam_role.cluster"},
+				{SourceAttr: "vpc_config.subnet_ids", TargetID: "aws_subnet.main"},
+			},
+		},
+		{
+			Type: "aws_eks_node_group", Name: "default", ID: "aws_eks_node_group.default",
+			References: []models.Reference{
+				{SourceAttr: "cluster_name", TargetID: "aws_eks_cluster.main"},
+				{SourceAttr: "node_role_arn", TargetID: "aws_iam_role.nodes"},
+				{SourceAttr: "subnet_ids", TargetID: "aws_subnet.main"},
+			},
+		},
+		{
+			Type: "aws_eks_addon", Name: "vpc_cni", ID: "aws_eks_addon.vpc_cni",
+			References: []models.Reference{
+				{SourceAttr: "cluster_name", TargetID: "aws_eks_cluster.main"},
+			},
+		},
+		{
+			Type: "aws_eks_fargate_profile", Name: "default", ID: "aws_eks_fargate_profile.default",
+			References: []models.Reference{
+				{SourceAttr: "cluster_name", TargetID: "aws_eks_cluster.main"},
+				{SourceAttr: "pod_execution_role_arn", TargetID: "aws_iam_role.nodes"},
+				{SourceAttr: "subnet_ids", TargetID: "aws_subnet.main"},
+			},
+		},
+		{
+			Type: "aws_eks_identity_provider_config", Name: "oidc", ID: "aws_eks_identity_provider_config.oidc",
+			References: []models.Reference{
+				{SourceAttr: "cluster_name", TargetID: "aws_eks_cluster.main"},
+			},
+		},
+
+		// RDS auxiliary groups.
+		{Type: "aws_db_subnet_group", Name: "main", ID: "aws_db_subnet_group.main"},
+		{Type: "aws_db_parameter_group", Name: "main", ID: "aws_db_parameter_group.main"},
+		{Type: "aws_db_option_group", Name: "main", ID: "aws_db_option_group.main"},
+		{
+			Type: "aws_db_instance", Name: "main", ID: "aws_db_instance.main",
+			References: []models.Reference{
+				{SourceAttr: "db_subnet_group_name", TargetID: "aws_db_subnet_group.main"},
+				{SourceAttr: "parameter_group_name", TargetID: "aws_db_parameter_group.main"},
+				{SourceAttr: "option_group_name", TargetID: "aws_db_option_group.main"},
+			},
+		},
+
+		// EC2 ASG family.
+		{Type: "aws_launch_template", Name: "app", ID: "aws_launch_template.app"},
+		{
+			Type: "aws_autoscaling_group", Name: "app", ID: "aws_autoscaling_group.app",
+			Attributes: map[string]any{
+				"max_size": float64(200),
+				"min_size": float64(0),
+			},
+			References: []models.Reference{
+				{SourceAttr: "launch_template.id", TargetID: "aws_launch_template.app"},
+				{SourceAttr: "vpc_zone_identifier", TargetID: "aws_subnet.main"},
+			},
+		},
+		{
+			Type: "aws_autoscaling_policy", Name: "scale_out", ID: "aws_autoscaling_policy.scale_out",
+			References: []models.Reference{
+				{SourceAttr: "autoscaling_group_name", TargetID: "aws_autoscaling_group.app"},
+			},
+		},
+	}
+
+	g := Build(resources, nil)
+
+	nodeMap := make(map[string]models.Node, len(g.Nodes))
+	for _, n := range g.Nodes {
+		nodeMap[n.ID] = n
+	}
+
+	cases := []struct {
+		id           string
+		abstractType string
+		public       bool
+	}{
+		{"aws_eks_cluster.main", "compute", true},
+		{"aws_eks_node_group.default", "compute", false},
+		{"aws_eks_addon.vpc_cni", "compute", false},
+		{"aws_eks_fargate_profile.default", "compute", false},
+		{"aws_eks_identity_provider_config.oidc", "identity", false},
+		{"aws_db_subnet_group.main", "network", false},
+		{"aws_db_parameter_group.main", "access_control", false},
+		{"aws_db_option_group.main", "access_control", false},
+		{"aws_launch_template.app", "compute", false},
+		{"aws_autoscaling_group.app", "compute", false},
+		{"aws_autoscaling_policy.scale_out", "compute", false},
+	}
+	for _, c := range cases {
+		n, ok := nodeMap[c.id]
+		if !ok {
+			t.Errorf("missing node %s", c.id)
+			continue
+		}
+		if n.Type != c.abstractType {
+			t.Errorf("node %s: expected abstract type %q, got %q", c.id, c.abstractType, n.Type)
+		}
+		if got, _ := n.Attributes["public"].(bool); got != c.public {
+			t.Errorf("node %s: expected public=%v, got %v", c.id, c.public, n.Attributes["public"])
+		}
+	}
+
+	// EKS literal endpoint_public_access must be promoted so
+	// eks_public_endpoint can read it.
+	cluster := nodeMap["aws_eks_cluster.main"]
+	if got, ok := cluster.Attributes["endpoint_public_access"].(bool); !ok || !got {
+		t.Errorf("expected EKS endpoint_public_access=true passthrough, got %v", cluster.Attributes["endpoint_public_access"])
+	}
+	if _, ok := cluster.Attributes["enabled_cluster_log_types"]; !ok {
+		t.Errorf("expected EKS enabled_cluster_log_types passthrough")
+	}
+
+	// ASG max_size / min_size literals must reach the node so
+	// asg_unrestricted_scaling can read them.
+	asg := nodeMap["aws_autoscaling_group.app"]
+	if got, ok := asg.Attributes["max_size"].(float64); !ok || got != 200 {
+		t.Errorf("ASG max_size passthrough = %v", asg.Attributes["max_size"])
+	}
+	if got, ok := asg.Attributes["min_size"].(float64); !ok || got != 0 {
+		t.Errorf("ASG min_size passthrough = %v", asg.Attributes["min_size"])
+	}
+
+	edgeSet := make(map[string]string, len(g.Edges))
+	for _, e := range g.Edges {
+		edgeSet[e.From+"|"+e.To] = e.Type
+	}
+	edgeCases := []struct {
+		from, to, edgeType string
+	}{
+		{"aws_eks_node_group.default", "aws_eks_cluster.main", "part_of"},
+		{"aws_eks_addon.vpc_cni", "aws_eks_cluster.main", "applies_to"},
+		{"aws_eks_fargate_profile.default", "aws_eks_cluster.main", "part_of"},
+		{"aws_eks_identity_provider_config.oidc", "aws_eks_cluster.main", "applies_to"},
+		{"aws_eks_cluster.main", "aws_iam_role.cluster", "attached_to"},
+		{"aws_eks_node_group.default", "aws_iam_role.nodes", "attached_to"},
+		{"aws_eks_node_group.default", "aws_subnet.main", "deployed_in"},
+		{"aws_eks_fargate_profile.default", "aws_iam_role.nodes", "attached_to"},
+		{"aws_eks_fargate_profile.default", "aws_subnet.main", "deployed_in"},
+		{"aws_db_instance.main", "aws_db_subnet_group.main", "deployed_in"},
+		{"aws_db_instance.main", "aws_db_parameter_group.main", "applies_to"},
+		{"aws_db_instance.main", "aws_db_option_group.main", "applies_to"},
+		{"aws_autoscaling_group.app", "aws_launch_template.app", "uses"},
+		{"aws_autoscaling_group.app", "aws_subnet.main", "deployed_in"},
+		{"aws_autoscaling_policy.scale_out", "aws_autoscaling_group.app", "applies_to"},
+	}
+	for _, c := range edgeCases {
+		got, ok := edgeSet[c.from+"|"+c.to]
+		if !ok {
+			t.Errorf("missing edge %s -> %s", c.from, c.to)
+			continue
+		}
+		if got != c.edgeType {
+			t.Errorf("edge %s -> %s: expected type %q, got %q", c.from, c.to, c.edgeType, got)
+		}
+	}
+
+	if g.Confidence.Score != 1.0 {
+		t.Errorf("tranche-3 fixture must produce confidence 1.0 (no warnings), got %f", g.Confidence.Score)
+	}
+}
+
 // TestBuild_Phase6_IAMAttachment_PolicyARNPassthrough is the contract test
 // that lets the iam_admin_policy_attached risk rule (Phase 6 PR2) inspect a
 // literal policy_arn at the graph node level. If this passthrough breaks,

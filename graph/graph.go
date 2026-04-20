@@ -45,20 +45,49 @@ var edgeTypeMap = map[string]string{
 	// as v1.1: prefer specific terms ("part_of", "applies_to",
 	// "deployed_in", "attached_to") only when the relationship has a
 	// stronger architectural meaning than the generic "references".
-	"aws_route53_record|aws_route53_zone":            "part_of",
-	"aws_kms_alias|aws_kms_key":                      "applies_to",
-	"aws_sns_topic_policy|aws_sns_topic":             "applies_to",
-	"aws_sqs_queue_policy|aws_sqs_queue":             "applies_to",
-	"aws_nat_gateway|aws_subnet":                     "deployed_in",
-	"aws_network_acl|aws_vpc":                        "part_of",
-	"aws_network_acl|aws_subnet":                     "applies_to",
-	"aws_network_acl_rule|aws_network_acl":           "applies_to",
-	"aws_ecs_service|aws_ecs_cluster":                "deployed_in",
-	"aws_ecs_service|aws_ecs_task_definition":        "uses",
-	"aws_ecs_service|aws_lb":                         "attached_to",
-	"aws_ecs_task_definition|aws_iam_role":           "attached_to",
-	"aws_cloudfront_distribution|aws_lb":             "attached_to",
-	"aws_cloudfront_distribution|aws_s3_bucket":      "attached_to",
+	"aws_route53_record|aws_route53_zone":       "part_of",
+	"aws_kms_alias|aws_kms_key":                 "applies_to",
+	"aws_sns_topic_policy|aws_sns_topic":        "applies_to",
+	"aws_sqs_queue_policy|aws_sqs_queue":        "applies_to",
+	"aws_nat_gateway|aws_subnet":                "deployed_in",
+	"aws_network_acl|aws_vpc":                   "part_of",
+	"aws_network_acl|aws_subnet":                "applies_to",
+	"aws_network_acl_rule|aws_network_acl":      "applies_to",
+	"aws_ecs_service|aws_ecs_cluster":           "deployed_in",
+	"aws_ecs_service|aws_ecs_task_definition":   "uses",
+	"aws_ecs_service|aws_lb":                    "attached_to",
+	"aws_ecs_task_definition|aws_iam_role":      "attached_to",
+	"aws_cloudfront_distribution|aws_lb":        "attached_to",
+	"aws_cloudfront_distribution|aws_s3_bucket": "attached_to",
+
+	// v1.3 -- Phase 8 (Coverage tranche 3). Same labelling philosophy
+	// as v1.1/v1.2: prefer specific terms when the relationship has a
+	// stronger architectural meaning than the generic "references".
+	//
+	// EKS family: node groups, fargate profiles, addons, and identity
+	// provider configs all live inside a cluster.
+	"aws_eks_node_group|aws_eks_cluster":               "part_of",
+	"aws_eks_fargate_profile|aws_eks_cluster":          "part_of",
+	"aws_eks_addon|aws_eks_cluster":                    "applies_to",
+	"aws_eks_identity_provider_config|aws_eks_cluster": "applies_to",
+	"aws_eks_cluster|aws_iam_role":                     "attached_to",
+	"aws_eks_node_group|aws_iam_role":                  "attached_to",
+	"aws_eks_node_group|aws_subnet":                    "deployed_in",
+	"aws_eks_fargate_profile|aws_iam_role":             "attached_to",
+	"aws_eks_fargate_profile|aws_subnet":               "deployed_in",
+	// RDS auxiliary groups: a DB instance attaches to its subnet
+	// group / parameter group / option group the same way it attaches
+	// to a security group.
+	"aws_db_instance|aws_db_subnet_group":    "deployed_in",
+	"aws_db_instance|aws_db_parameter_group": "applies_to",
+	"aws_db_instance|aws_db_option_group":    "applies_to",
+	// EC2 ASG family: launch templates parameterize ASGs; ASG policies
+	// govern an existing ASG.
+	"aws_autoscaling_group|aws_launch_template":    "uses",
+	"aws_autoscaling_group|aws_subnet":             "deployed_in",
+	"aws_autoscaling_group|aws_security_group":     "attached_to",
+	"aws_autoscaling_policy|aws_autoscaling_group": "applies_to",
+	"aws_launch_template|aws_security_group":       "attached_to",
 }
 
 // Build constructs a Graph from parsed resources and accumulated warnings.
@@ -103,6 +132,17 @@ func buildNodes(resources []models.RawResource) []models.Node {
 
 func deriveAttributes(res models.RawResource) map[string]any {
 	attrs := make(map[string]any)
+
+	// v1.3 PR2 (Phase 8 -- library mode). The parser marks library-mode
+	// phantoms with `conditional = true`. We pass the flag through
+	// untouched so the rule layer (isConditionalNode in
+	// risk/rules_v13.go) and the renderer (Mermaid `?` label prefix)
+	// can both see it.
+	if v, ok := res.Attributes["conditional"]; ok {
+		if b, ok := v.(bool); ok && b {
+			attrs["conditional"] = true
+		}
+	}
 
 	switch res.Type {
 	case "aws_lb":
@@ -217,6 +257,52 @@ func deriveAttributes(res models.RawResource) map[string]any {
 		if v, ok := res.Attributes["egress"]; ok {
 			if b, ok := v.(bool); ok {
 				attrs["egress"] = b
+			}
+		}
+
+	// v1.3 (Phase 8): EKS cluster. The control plane is publicly
+	// reachable iff `vpc_config.endpoint_public_access = true` (the
+	// AWS provider default). The parser promotes nested-block
+	// attributes as `<blockType>.<attrName>`, so we look for
+	// `vpc_config.endpoint_public_access` and
+	// `vpc_config.endpoint_public_access_cidrs`. Variable-driven
+	// values land as nil and the rule treats them as missing.
+	//
+	// `enabled_cluster_log_types` is a top-level list; we promote it
+	// as a presence marker (length > 0) so eks_no_logging fires only
+	// when explicitly empty / unset.
+	case "aws_eks_cluster":
+		pub := false
+		if v, ok := res.Attributes["vpc_config.endpoint_public_access"]; ok {
+			if b, ok := v.(bool); ok {
+				attrs["endpoint_public_access"] = b
+				pub = b
+			}
+		}
+		attrs["public"] = pub
+		if v, ok := res.Attributes["vpc_config.endpoint_public_access_cidrs"]; ok {
+			if lst, ok := v.([]any); ok && len(lst) > 0 {
+				attrs["endpoint_public_access_cidrs"] = lst
+			}
+		}
+		if v, ok := res.Attributes["enabled_cluster_log_types"]; ok {
+			if lst, ok := v.([]any); ok && len(lst) > 0 {
+				attrs["enabled_cluster_log_types"] = lst
+			}
+		}
+
+	// v1.3 (Phase 8): autoscaling group. Promote literal max_size /
+	// min_size so asg_unrestricted_scaling can read them without
+	// re-parsing. Variable-driven values land as nil and the rule
+	// stays silent (consistent with project rule "never guess at
+	// unresolved expressions").
+	case "aws_autoscaling_group":
+		attrs["public"] = false
+		for _, k := range []string{"max_size", "min_size"} {
+			if v, ok := res.Attributes[k]; ok {
+				if f, ok := v.(float64); ok {
+					attrs[k] = f
+				}
 			}
 		}
 

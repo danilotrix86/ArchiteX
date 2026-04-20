@@ -111,6 +111,12 @@ func EvaluateWithBaseline(d delta.Delta, cfg *config.Config, base *baseline.Base
 	reasons = append(reasons, evaluateMessagingTopicPublic(d)...)
 	reasons = append(reasons, evaluateNACLAllowAllIngress(d)...)
 
+	// Phase 8 PR1 (v1.3) — Coverage tranche 3 rules. Same caps,
+	// ordering, and conditional-node guard as the Phase 6/7 groups.
+	reasons = append(reasons, evaluateEKSPublicEndpoint(d)...)
+	reasons = append(reasons, evaluateEKSNoLogging(d)...)
+	reasons = append(reasons, evaluateASGUnrestrictedScaling(d)...)
+
 	// Phase 7 PR5 (v1.2) — Baseline anomaly rules. Skipped entirely when
 	// no baseline exists; this preserves the v1.1 zero-config invariant.
 	reasons = append(reasons, evaluateFirstTimeResourceType(d, base)...)

@@ -184,9 +184,9 @@ func TestFormatHTML_Deterministic_SameInputSameOutput(t *testing.T) {
 		Timestamp:   "2026-04-19T14:30:22Z",
 		ToolVersion: ToolVersion,
 		Files: map[string]string{
-			"a.json":  "1111",
-			"b.json":  "2222",
-			"c.json":  "3333",
+			"a.json": "1111",
+			"b.json": "2222",
+			"c.json": "3333",
 		},
 	}
 	a := FormatHTML(rep, m)

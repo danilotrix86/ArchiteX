@@ -107,6 +107,25 @@ var SupportedResources = map[string]bool{
 	"aws_ecs_cluster":             true,
 	"aws_ecs_service":             true,
 	"aws_ecs_task_definition":     true,
+
+	// v1.3 -- Coverage tranche 3 (Phase 8). EKS family covers the #1
+	// missing resource cluster from the v1.2 real-world validation
+	// sweep (`docs/v1.2-validation-findings.md`); RDS subnet/parameter/
+	// option groups close the persistent-data gap; EC2 launch templates
+	// + autoscaling group + autoscaling policy cover the modern compute
+	// substrate (any EKS managed-node group / non-trivial EC2 fleet
+	// uses these).
+	"aws_eks_cluster":                  true,
+	"aws_eks_node_group":               true,
+	"aws_eks_addon":                    true,
+	"aws_eks_fargate_profile":          true,
+	"aws_eks_identity_provider_config": true,
+	"aws_db_subnet_group":              true,
+	"aws_db_parameter_group":           true,
+	"aws_db_option_group":              true,
+	"aws_launch_template":              true,
+	"aws_autoscaling_group":            true,
+	"aws_autoscaling_policy":           true,
 }
 
 // AbstractionMap maps AWS provider types to generic architecture types.
@@ -166,4 +185,27 @@ var AbstractionMap = map[string]string{
 	"aws_ecs_cluster":             "compute",
 	"aws_ecs_service":             "compute",
 	"aws_ecs_task_definition":     "compute",
+
+	// v1.3 -- Phase 8 (Coverage tranche 3). No new abstract types. EKS
+	// clusters / node groups / fargate profiles are "compute" (their
+	// purpose is to run workloads). EKS addons are "compute" too --
+	// they ship as cluster-attached compute units (CoreDNS, kube-proxy,
+	// vpc-cni). EKS identity provider configs are "identity" because
+	// they govern who may assume cluster RBAC roles. RDS group
+	// resources split by what they govern: subnet groups are "network"
+	// (where the DB lives), parameter and option groups are
+	// "access_control" (they govern engine knobs and connection
+	// behavior, including TLS / auth options). Launch templates and
+	// ASGs are "compute" siblings of aws_instance / aws_ecs_service.
+	"aws_eks_cluster":                  "compute",
+	"aws_eks_node_group":               "compute",
+	"aws_eks_addon":                    "compute",
+	"aws_eks_fargate_profile":          "compute",
+	"aws_eks_identity_provider_config": "identity",
+	"aws_db_subnet_group":              "network",
+	"aws_db_parameter_group":           "access_control",
+	"aws_db_option_group":              "access_control",
+	"aws_launch_template":              "compute",
+	"aws_autoscaling_group":            "compute",
+	"aws_autoscaling_policy":           "compute",
 }

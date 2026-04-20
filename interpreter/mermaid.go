@@ -52,6 +52,12 @@ type rendered struct {
 	OriginalID   string // raw "type.name" for label and sort key
 	AbstractType string
 	Status       nodeStatus
+	// Conditional is the v1.3 PR2 (library-mode) marker. When true the
+	// node label is prefixed with "?" so a reviewer never confuses a
+	// library-mode phantom with a definite resource. The flag flows
+	// through the delta from the parser via
+	// graph.deriveAttributes (Attributes["conditional"]).
+	Conditional bool
 }
 
 // MermaidBudget is the default soft byte budget for a rendered Mermaid block.
@@ -146,9 +152,14 @@ func renderFromSets(nodes []rendered, edges []renderedEdge, notice truncationNot
 
 	b.WriteString("\n")
 	for _, n := range nodes {
-		fmt.Fprintf(&b, "    %s[\"%s%s: %s\"]:::%s\n",
+		conditionalPrefix := ""
+		if n.Conditional {
+			conditionalPrefix = "? "
+		}
+		fmt.Fprintf(&b, "    %s[\"%s%s%s: %s\"]:::%s\n",
 			n.ID,
 			n.Status.marker(),
+			conditionalPrefix,
 			n.AbstractType,
 			n.OriginalID,
 			n.Status.class(),
@@ -316,13 +327,16 @@ func budgetFit(nodes []rendered, edges []renderedEdge, maxBytes int) ([]rendered
 func collectNodes(d delta.Delta) []rendered {
 	byID := make(map[string]*rendered)
 
-	upsert := func(id, abstractType string, status nodeStatus) {
+	upsert := func(id, abstractType string, status nodeStatus, conditional bool) {
 		if existing, ok := byID[id]; ok {
 			if status > existing.Status {
 				existing.Status = status
 			}
 			if abstractType != "" && existing.AbstractType == "context" {
 				existing.AbstractType = abstractType
+			}
+			if conditional {
+				existing.Conditional = true
 			}
 			return
 		}
@@ -335,25 +349,34 @@ func collectNodes(d delta.Delta) []rendered {
 			OriginalID:   id,
 			AbstractType: t,
 			Status:       status,
+			Conditional:  conditional,
 		}
 	}
 
+	isCond := func(attrs map[string]any) bool {
+		if attrs == nil {
+			return false
+		}
+		v, ok := attrs["conditional"].(bool)
+		return ok && v
+	}
+
 	for _, n := range d.AddedNodes {
-		upsert(n.ID, n.Type, statusAdded)
+		upsert(n.ID, n.Type, statusAdded, isCond(n.Attributes))
 	}
 	for _, n := range d.RemovedNodes {
-		upsert(n.ID, n.Type, statusRemoved)
+		upsert(n.ID, n.Type, statusRemoved, isCond(n.Attributes))
 	}
 	for _, cn := range d.ChangedNodes {
-		upsert(cn.ID, cn.Type, statusChanged)
+		upsert(cn.ID, cn.Type, statusChanged, false)
 	}
 	for _, e := range d.AddedEdges {
-		upsert(e.From, abstractFromID(e.From), statusContext)
-		upsert(e.To, abstractFromID(e.To), statusContext)
+		upsert(e.From, abstractFromID(e.From), statusContext, false)
+		upsert(e.To, abstractFromID(e.To), statusContext, false)
 	}
 	for _, e := range d.RemovedEdges {
-		upsert(e.From, abstractFromID(e.From), statusContext)
-		upsert(e.To, abstractFromID(e.To), statusContext)
+		upsert(e.From, abstractFromID(e.From), statusContext, false)
+		upsert(e.To, abstractFromID(e.To), statusContext, false)
 	}
 
 	out := make([]rendered, 0, len(byID))

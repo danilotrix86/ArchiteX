@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 
@@ -109,6 +110,20 @@ func buildSingleResource(block *hclsyntax.Block, resType, resName, resID string,
 func expandCount(block *hclsyntax.Block, resType, resName, resID string, countAttr *hclsyntax.Attribute, ctx *parseContext) ([]models.RawResource, []models.Warning) {
 	n, ok := evalCount(countAttr)
 	if !ok {
+		// Phase 8 PR2 (v1.3) -- library mode. The canonical module-author
+		// idiom `count = var.create ? 1 : 0` (and its variants) makes
+		// EVERY resource conditional on a single boolean. Without help
+		// the v1.2 parser warned-and-skipped them, producing an empty
+		// graph that looked broken.
+		//
+		// In library mode we materialize ONE phantom resource per gate,
+		// marked `Attributes["conditional"] = true`. Risk rules
+		// (rules.go / rules_v12.go / rules_v13.go) MUST treat
+		// conditional nodes as non-existent for scoring -- the
+		// isConditionalNode helper in rules_v13.go owns that contract.
+		if ctx != nil && ctx.libraryMode && isVarConditionalCount(countAttr) {
+			return materializeConditional(block, resType, resName, resID, ctx)
+		}
 		return nil, []models.Warning{{
 			Category: models.WarnUnsupportedConstruct,
 			Message:  fmt.Sprintf("%s uses count with a non-literal expression (skipping)", resID),
@@ -351,15 +366,140 @@ func expandDynamicBlock(dyn *hclsyntax.Block, resID string) ([]*hclsyntax.Block,
 		// resources) ARE extracted -- and that is the high-value path
 		// (security_group_rules referencing security groups, etc.).
 		instance := &hclsyntax.Block{
-			Type:        label,
-			Labels:      nil,
-			Body:        content.Body,
-			TypeRange:   content.TypeRange,
-			LabelRanges: nil,
-			OpenBraceRange: content.OpenBraceRange,
+			Type:            label,
+			Labels:          nil,
+			Body:            content.Body,
+			TypeRange:       content.TypeRange,
+			LabelRanges:     nil,
+			OpenBraceRange:  content.OpenBraceRange,
 			CloseBraceRange: content.CloseBraceRange,
 		}
 		out = append(out, instance)
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 PR2 (v1.3) -- library-mode conditional materialization.
+// ---------------------------------------------------------------------------
+
+// isVarConditionalCount reports whether a count expression matches one of
+// the canonical "module-author conditional gate" shapes:
+//
+//	count = var.<name> ? <int> : 0
+//	count = var.<name> ? <int> : <int>      (any non-zero false branch)
+//	count = local.<name> ? <int> : 0        (locals follow the same idiom)
+//	count = length(var.<name>) > 0 ? 1 : 0
+//
+// Returning true means the expression is a deterministic conditional gate
+// that we are willing to honor in library mode (materialize one phantom).
+// We deliberately do NOT match arbitrary expressions: anything we can't
+// statically classify as a "create-or-not" gate continues to warn and
+// skip, preserving the engine invariant "never invent resources".
+func isVarConditionalCount(attr *hclsyntax.Attribute) bool {
+	if attr == nil {
+		return false
+	}
+	cond, ok := attr.Expr.(*hclsyntax.ConditionalExpr)
+	if !ok {
+		return false
+	}
+	if !isVarOrLocalRef(cond.Condition) && !isLengthGtZero(cond.Condition) {
+		return false
+	}
+	// True branch must be a positive literal int (typically 1). False
+	// branch can be any literal (typically 0) -- we materialize the
+	// "true" instance regardless because its existence is conditional.
+	if _, ok := literalNonNegativeInt(cond.TrueResult); !ok {
+		return false
+	}
+	if _, ok := literalNonNegativeInt(cond.FalseResult); !ok {
+		return false
+	}
+	return true
+}
+
+// isVarOrLocalRef returns true for `var.<name>` / `local.<name>`
+// traversals. We only honor variable / local references because those
+// are the gates a module author writes; resource / data references are
+// left to the variable-driven warning path so we don't materialize a
+// phantom for `count = aws_instance.web.id == "x" ? 1 : 0`.
+func isVarOrLocalRef(expr hclsyntax.Expression) bool {
+	t, ok := expr.(*hclsyntax.ScopeTraversalExpr)
+	if !ok {
+		return false
+	}
+	if len(t.Traversal) < 2 {
+		return false
+	}
+	root, ok := t.Traversal[0].(hcl.TraverseRoot)
+	if !ok {
+		return false
+	}
+	return root.Name == "var" || root.Name == "local"
+}
+
+// isLengthGtZero matches `length(var.X) > 0` / `length(local.X) > 0`.
+// This is the second canonical "create-or-not" gate shape and shows up
+// in roughly a third of community modules.
+func isLengthGtZero(expr hclsyntax.Expression) bool {
+	bin, ok := expr.(*hclsyntax.BinaryOpExpr)
+	if !ok {
+		return false
+	}
+	if bin.Op != hclsyntax.OpGreaterThan {
+		return false
+	}
+	call, ok := bin.LHS.(*hclsyntax.FunctionCallExpr)
+	if !ok || call.Name != "length" || len(call.Args) != 1 {
+		return false
+	}
+	if !isVarOrLocalRef(call.Args[0]) {
+		return false
+	}
+	rhsVal, diags := bin.RHS.Value(nil)
+	if diags.HasErrors() || !rhsVal.IsKnown() || rhsVal.IsNull() {
+		return false
+	}
+	if rhsVal.Type() != cty.Number {
+		return false
+	}
+	bf := rhsVal.AsBigFloat()
+	f, _ := bf.Float64()
+	return f == 0
+}
+
+// literalNonNegativeInt extracts a non-negative integer literal from an
+// expression, returning (value, true) on success.
+func literalNonNegativeInt(expr hclsyntax.Expression) (int, bool) {
+	val, diags := expr.Value(nil)
+	if diags.HasErrors() || !val.IsKnown() || val.IsNull() || val.Type() != cty.Number {
+		return 0, false
+	}
+	bf := val.AsBigFloat()
+	f, _ := bf.Float64()
+	if f < 0 {
+		return 0, false
+	}
+	return int(f), true
+}
+
+// materializeConditional emits a single phantom resource for a
+// var-driven conditional count gate. The phantom is marked
+// `Attributes["conditional"] = true` so risk rules can short-circuit
+// and so the renderer can prefix the node label with `?`.
+func materializeConditional(block *hclsyntax.Block, resType, resName, resID string, ctx *parseContext) ([]models.RawResource, []models.Warning) {
+	body, dynWarnings := materializeDynamicBlocks(block.Body, resID)
+	attrs := extractAttributes(body, ctx)
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	attrs["conditional"] = true
+	return []models.RawResource{{
+		Type:       resType,
+		Name:       resName,
+		ID:         resID,
+		Attributes: attrs,
+		References: extractReferences(body),
+	}}, dynWarnings
 }

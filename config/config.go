@@ -45,10 +45,38 @@ const (
 // Config is the parsed `.architex.yml` document plus any inline suppressions
 // merged in from .tf files. A nil *Config means "use defaults" everywhere.
 type Config struct {
+	Parser       ParserConfig          `yaml:"parser,omitempty"`
 	Rules        map[string]RuleConfig `yaml:"rules,omitempty"`
 	Thresholds   Thresholds            `yaml:"thresholds,omitempty"`
 	Ignore       Ignore                `yaml:"ignore,omitempty"`
 	Suppressions []Suppression         `yaml:"suppressions,omitempty"`
+}
+
+// ParserMode selects how the parser handles count/for_each gates that
+// depend on a variable rather than a literal. v1.3 introduces
+// "library" mode for module-author repos where every resource is wrapped
+// in `count = var.create ? 1 : 0`. The default ("consumer") preserves
+// v1.2 behavior bit-identically.
+type ParserMode string
+
+const (
+	// ParserModeConsumer is the default. count = var.X ? 1 : 0 and
+	// every other variable-driven gate continue to warn-and-skip,
+	// exactly as in v1.2.
+	ParserModeConsumer ParserMode = "consumer"
+	// ParserModeLibrary materializes ONE phantom resource for every
+	// `count = var.X ? <int> : 0` style conditional gate, marking
+	// it `Attributes["conditional"] = true`. Risk rules MUST treat
+	// these as non-existent for scoring purposes (the rule layer
+	// owns that contract).
+	ParserModeLibrary ParserMode = "library"
+)
+
+// ParserConfig holds parser-level settings. Today the only field is
+// `mode`, which selects how variable-driven count/for_each gates are
+// handled.
+type ParserConfig struct {
+	Mode ParserMode `yaml:"mode,omitempty"`
 }
 
 // RuleConfig overrides per-rule defaults. Either field may be unset
@@ -119,11 +147,28 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// LibraryMode reports whether the parser should materialize phantoms
+// for var.X-style conditional gates. False (default) preserves v1.2
+// behavior bit-identically.
+func (c *Config) LibraryMode() bool {
+	if c == nil {
+		return false
+	}
+	return c.Parser.Mode == ParserModeLibrary
+}
+
 // validate enforces documented invariants without imposing opinionated
 // defaults. Anything we cannot validate locally (e.g. unknown rule IDs)
 // is intentionally permissive -- new rule IDs land all the time and we do
 // not want a config from v1.2 to break a v1.3 upgrade.
 func (c *Config) validate() error {
+	switch c.Parser.Mode {
+	case "", ParserModeConsumer, ParserModeLibrary:
+		// ok
+	default:
+		return fmt.Errorf("parser.mode must be one of %q, %q (got %q)",
+			ParserModeConsumer, ParserModeLibrary, c.Parser.Mode)
+	}
 	if c.Thresholds.Warn != nil && *c.Thresholds.Warn < 0 {
 		return fmt.Errorf("thresholds.warn must be >= 0")
 	}

@@ -104,6 +104,63 @@ func focusForRule(reason risk.RiskReason, d delta.Delta) string {
 			"Confirm the removal of %s is intended; check for orphaned dependencies and audit log retention.",
 			joinHumanList(ids),
 		)
+
+	// Phase 6 (v1.1) -- AWS Top 10 rules.
+	case "s3_bucket_public_exposure":
+		return fmt.Sprintf(
+			"Re-verify the bucket exposure on %s -- removal of a public-access block or addition of a bucket policy can grant public read; confirm Statement[].Principal is scoped.",
+			reason.ResourceID,
+		)
+	case "iam_admin_policy_attached":
+		return fmt.Sprintf(
+			"Audit the privilege grant on %s -- AdministratorAccess / IAMFullAccess gives root-equivalent control to anyone who assumes the role.",
+			reason.ResourceID,
+		)
+	case "lambda_public_url_introduced":
+		return fmt.Sprintf(
+			"Inspect the Lambda function URL %s for authorization_type, IAM auth, and (ideally) WAF coverage; public Function URLs bypass API Gateway entirely.",
+			reason.ResourceID,
+		)
+
+	// Phase 7 PR4 (v1.2) -- Coverage tranche 2 rules.
+	case "cloudfront_no_waf":
+		return fmt.Sprintf(
+			"Add an AWS WAF (web_acl_id) to %s before merging; CloudFront edges without a WAF expose the origin to every L7 attack pattern.",
+			reason.ResourceID,
+		)
+	case "ebs_volume_unencrypted":
+		return fmt.Sprintf(
+			"Set encrypted = true on %s; unencrypted volumes at rest fail PCI / HIPAA / SOC2 audits.",
+			reason.ResourceID,
+		)
+	case "messaging_topic_public":
+		return fmt.Sprintf(
+			"Restrict the topic/queue policy %s -- a Principal=\"*\" Allow lets anyone with the ARN subscribe / poll.",
+			reason.ResourceID,
+		)
+	case "nacl_allow_all_ingress":
+		return fmt.Sprintf(
+			"Tighten the NACL rule %s; an Allow on 0.0.0.0/0 at a low rule_number defeats any tighter SG above it.",
+			reason.ResourceID,
+		)
+
+	// Phase 8 (v1.3) -- Coverage tranche 3 rules.
+	case "eks_public_endpoint":
+		return fmt.Sprintf(
+			"Restrict the EKS API endpoint on %s via vpc_config.endpoint_public_access_cidrs, or set endpoint_public_access = false and access through a private link.",
+			reason.ResourceID,
+		)
+	case "eks_no_logging":
+		return fmt.Sprintf(
+			"Enable enabled_cluster_log_types on %s (api, audit, authenticator are the bare minimum) so control-plane activity is forensically auditable.",
+			reason.ResourceID,
+		)
+	case "asg_unrestricted_scaling":
+		return fmt.Sprintf(
+			"Cap max_size on %s and set a non-zero min_size floor; an unbounded ASG is both a runaway-cost vector and a stampede primitive.",
+			reason.ResourceID,
+		)
+
 	default:
 		return ""
 	}

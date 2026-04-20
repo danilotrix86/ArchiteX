@@ -112,6 +112,9 @@ func parseFile(path, dir, rootDir, idPrefix string, depth int, cfg *config.Confi
 	// can substitute `data.aws_iam_policy.<name>.arn` references with the
 	// captured literal regardless of declaration order.
 	ctx := newParseContext()
+	if cfg.LibraryMode() {
+		ctx.libraryMode = true
+	}
 	scanDataBlocks(body, ctx)
 
 	for _, block := range body.Blocks {

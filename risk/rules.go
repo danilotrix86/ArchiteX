@@ -192,6 +192,9 @@ func evaluateS3BucketPublicExposure(d delta.Delta) []RiskReason {
 		if n.ProviderType != "aws_s3_bucket_policy" {
 			continue
 		}
+		if isConditionalNode(n.Attributes) {
+			continue
+		}
 		if isDenyOnlyBucketPolicy(n.Attributes) {
 			// Phase 7 PR2: deny-only policies cannot introduce public
 			// exposure. Skip silently -- the policy is still visible in
@@ -260,6 +263,9 @@ func evaluateIAMAdminAttached(d delta.Delta) []RiskReason {
 		if n.ProviderType != "aws_iam_role_policy_attachment" {
 			continue
 		}
+		if isConditionalNode(n.Attributes) {
+			continue
+		}
 		raw, ok := n.Attributes["policy_arn"]
 		if !ok {
 			continue
@@ -304,6 +310,9 @@ func evaluateLambdaPublicURL(d delta.Delta) []RiskReason {
 	var reasons []RiskReason
 	for _, n := range d.AddedNodes {
 		if n.ProviderType != "aws_lambda_function_url" {
+			continue
+		}
+		if isConditionalNode(n.Attributes) {
 			continue
 		}
 		if len(reasons) >= phase6CapPerRule {
