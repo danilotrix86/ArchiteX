@@ -100,13 +100,13 @@ var edgeTypeMap = map[string]string{
 	// subnets and bind to NSGs; LBs front a public IP and live in a
 	// subnet. NSG rules attach to their parent NSG (mirrors
 	// aws_security_group_rule -> aws_security_group).
-	"azurerm_subnet|azurerm_virtual_network":                  "part_of",
-	"azurerm_network_interface|azurerm_subnet":                "deployed_in",
-	"azurerm_network_interface|azurerm_network_security_group": "attached_to",
-	"azurerm_network_interface|azurerm_public_ip":             "attached_to",
-	"azurerm_lb|azurerm_subnet":                                "deployed_in",
-	"azurerm_lb|azurerm_public_ip":                             "attached_to",
-	"azurerm_network_security_group|azurerm_subnet":            "applies_to",
+	"azurerm_subnet|azurerm_virtual_network":                       "part_of",
+	"azurerm_network_interface|azurerm_subnet":                     "deployed_in",
+	"azurerm_network_interface|azurerm_network_security_group":     "attached_to",
+	"azurerm_network_interface|azurerm_public_ip":                  "attached_to",
+	"azurerm_lb|azurerm_subnet":                                    "deployed_in",
+	"azurerm_lb|azurerm_public_ip":                                 "attached_to",
+	"azurerm_network_security_group|azurerm_subnet":                "applies_to",
 	"azurerm_network_security_rule|azurerm_network_security_group": "applies_to",
 	// VM compute: VMs attach to NICs (the Azure compute model -- a VM
 	// has no direct subnet reference; the NIC is the network anchor).
