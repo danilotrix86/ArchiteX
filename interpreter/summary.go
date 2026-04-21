@@ -161,6 +161,25 @@ func focusForRule(reason risk.RiskReason, d delta.Delta) string {
 			reason.ResourceID,
 		)
 
+	// Phase 9 (v1.4) -- Azure tranche-0 rules. Each focus message is the
+	// Azure-vocabulary analog of its AWS counterpart so reviewers used to
+	// the AWS rules see consistent guidance on Azure PRs.
+	case "nsg_allow_all_ingress":
+		return fmt.Sprintf(
+			"Tighten the NSG rule %s; an Allow inbound from \"*\" / 0.0.0.0/0 opens the subnet at the network layer regardless of any tighter NSG rule above it.",
+			reason.ResourceID,
+		)
+	case "storage_account_public":
+		return fmt.Sprintf(
+			"Re-verify the storage account %s -- public_network_access_enabled or allow_nested_items_to_be_public both expose blob/file/table/queue contents to anonymous callers; scope via private endpoints or network rules.",
+			reason.ResourceID,
+		)
+	case "mssql_database_public":
+		return fmt.Sprintf(
+			"Restrict public access on MSSQL server %s -- set public_network_access_enabled = false, or scope reachability via an azurerm_mssql_firewall_rule with explicit IP ranges.",
+			reason.ResourceID,
+		)
+
 	default:
 		return ""
 	}

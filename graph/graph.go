@@ -4,6 +4,7 @@ package graph
 
 import (
 	"fmt"
+	"strings"
 
 	"architex/models"
 )
@@ -88,6 +89,32 @@ var edgeTypeMap = map[string]string{
 	"aws_autoscaling_group|aws_security_group":     "attached_to",
 	"aws_autoscaling_policy|aws_autoscaling_group": "applies_to",
 	"aws_launch_template|aws_security_group":       "attached_to",
+
+	// v1.4 -- Phase 9 (Azure tranche-0). Same labelling philosophy as
+	// the AWS tranches: "part_of" for containment, "deployed_in" for
+	// placement, "attached_to" for non-containment binding,
+	// "applies_to" for governance / policy attachment. Anything not
+	// listed here falls through to the generic "references" edge.
+	//
+	// Network topology: subnets live inside a VNet; NICs are placed in
+	// subnets and bind to NSGs; LBs front a public IP and live in a
+	// subnet. NSG rules attach to their parent NSG (mirrors
+	// aws_security_group_rule -> aws_security_group).
+	"azurerm_subnet|azurerm_virtual_network":                  "part_of",
+	"azurerm_network_interface|azurerm_subnet":                "deployed_in",
+	"azurerm_network_interface|azurerm_network_security_group": "attached_to",
+	"azurerm_network_interface|azurerm_public_ip":             "attached_to",
+	"azurerm_lb|azurerm_subnet":                                "deployed_in",
+	"azurerm_lb|azurerm_public_ip":                             "attached_to",
+	"azurerm_network_security_group|azurerm_subnet":            "applies_to",
+	"azurerm_network_security_rule|azurerm_network_security_group": "applies_to",
+	// VM compute: VMs attach to NICs (the Azure compute model -- a VM
+	// has no direct subnet reference; the NIC is the network anchor).
+	"azurerm_linux_virtual_machine|azurerm_network_interface":   "attached_to",
+	"azurerm_windows_virtual_machine|azurerm_network_interface": "attached_to",
+	// Data: an MSSQL database is part_of its parent server (same
+	// containment semantics as aws_route53_record -> aws_route53_zone).
+	"azurerm_mssql_database|azurerm_mssql_server": "part_of",
 }
 
 // Build constructs a Graph from parsed resources and accumulated warnings.
@@ -306,6 +333,76 @@ func deriveAttributes(res models.RawResource) map[string]any {
 			}
 		}
 
+	// v1.4 (Phase 9): Azure load balancer. Always public:true.
+	// Mirrors aws_lb -- if the resource exists, it is an entry point.
+	// (Internal Azure LBs do exist via sku/frontend_ip_configuration,
+	// but matching that requires nested-block traversal and is a
+	// future tranche; the current default fires conservatively.)
+	case "azurerm_lb":
+		attrs["public"] = true
+
+	// v1.4 (Phase 9): Azure public IP. Always public:true. The
+	// resource's whole purpose is to assign a routable address; if
+	// it appears in a graph it is an exposure surface.
+	case "azurerm_public_ip":
+		attrs["public"] = true
+
+	// v1.4 (Phase 9): Azure NSG rule. Promote the literal trio
+	// (source_address_prefix, access, direction) so
+	// nsg_allow_all_ingress can inspect them without re-parsing.
+	// Variable-driven values land as nil; the rule then stays silent.
+	// `public` becomes true when the rule itself opens the world
+	// inbound, mirroring aws_security_group_rule's CIDR-based check.
+	case "azurerm_network_security_rule":
+		pub := false
+		for _, k := range []string{"source_address_prefix", "access", "direction"} {
+			if v, ok := res.Attributes[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					attrs[k] = s
+				}
+			}
+		}
+		if src, ok := attrs["source_address_prefix"].(string); ok {
+			if (src == "*" || src == "0.0.0.0/0") &&
+				strings.EqualFold(asString(attrs["access"]), "allow") &&
+				strings.EqualFold(asString(attrs["direction"]), "inbound") {
+				pub = true
+			}
+		}
+		attrs["public"] = pub
+
+	// v1.4 (Phase 9): Azure storage account. Promote the two
+	// literal flags storage_account_public reads. Default-false
+	// posture: a missing attribute does NOT imply public access
+	// (azurerm defaults vary by version, and we never guess).
+	case "azurerm_storage_account":
+		pub := false
+		for _, k := range []string{"public_network_access_enabled", "allow_nested_items_to_be_public"} {
+			if v, ok := res.Attributes[k]; ok {
+				if b, ok := v.(bool); ok {
+					attrs[k] = b
+					if b {
+						pub = true
+					}
+				}
+			}
+		}
+		attrs["public"] = pub
+
+	// v1.4 (Phase 9): Azure MSSQL server. Promote
+	// public_network_access_enabled so mssql_database_public can
+	// inspect it without re-parsing. Variable-driven values land as
+	// nil; the rule then stays silent.
+	case "azurerm_mssql_server":
+		pub := false
+		if v, ok := res.Attributes["public_network_access_enabled"]; ok {
+			if b, ok := v.(bool); ok {
+				attrs["public_network_access_enabled"] = b
+				pub = b
+			}
+		}
+		attrs["public"] = pub
+
 	default:
 		// Includes the rest of the Phase 6 resources (aws_s3_bucket,
 		// aws_s3_bucket_policy, aws_s3_bucket_public_access_block,
@@ -318,6 +415,16 @@ func deriveAttributes(res models.RawResource) map[string]any {
 	}
 
 	return attrs
+}
+
+// asString safely extracts a string from an attribute value. Returns "" if
+// the value is nil or not a string. v1.4 helper used by the Azure NSG rule
+// derivation to compare promoted-but-typed-loosely literals.
+func asString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // hasCIDRAllTraffic checks if any cidr_blocks attribute contains "0.0.0.0/0".

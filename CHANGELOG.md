@@ -4,6 +4,155 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-21
+
+The "multi-provider" release (Phase 9). Closes the highest-asked-for
+gap from the v1.3 launch — Azure support — by adding a tranche-0 set
+of `azurerm_*` resource types and three Azure-specific risk rules on
+top of the existing four-stage pipeline. AWS-only repositories see
+**zero behavioral change** and continue to produce bit-identical
+output to v1.3.
+
+The trust model, parser, delta engine, sanitizer, baseline engine,
+audit-bundle layout, and on-disk JSON schema are unchanged. The only
+new file is `risk/rules_azure.go`; everything else is additive into an
+existing map, switch arm, or rule list.
+
+The `v1` floating tag in `uses: danilotrix86/ArchiteX@v1` keeps
+working for every existing consumer. v2.0 stays reserved for a
+genuine repositioning (a second IaC language, or a trust-model
+change).
+
+### Added (Azure tranche-0)
+
+- **12 new `azurerm_*` resource types**, mirroring the AWS v1.0
+  canonical 3-tier scope. Every entry maps into one of the seven
+  established abstract types -- no new abstract type was introduced,
+  so `interpreter.typePriority` and the Mermaid byte-budget code are
+  untouched.
+  - **Network topology** — `azurerm_virtual_network`, `azurerm_subnet`,
+    `azurerm_public_ip`, `azurerm_network_interface`. The NIC is the
+    "free win" that lets VM topology render faithfully (a VM without
+    a NIC looks stranded in the diagram).
+  - **Network-security boundary** — `azurerm_network_security_group`,
+    `azurerm_network_security_rule`. Rules attach to their parent NSG
+    (mirrors `aws_security_group_rule -> aws_security_group`).
+  - **Compute** — `azurerm_linux_virtual_machine`,
+    `azurerm_windows_virtual_machine`. Both attach to NICs (the
+    Azure compute model -- a VM has no direct subnet reference).
+  - **Entry point** — `azurerm_lb` (always `public:true`; internal
+    LBs are deferred to a later tranche, mirrors the conservative
+    posture taken on `aws_lb`).
+  - **Storage at rest** — `azurerm_storage_account` (sibling of
+    `aws_s3_bucket`).
+  - **Data tier** — `azurerm_mssql_server` and `azurerm_mssql_database`.
+    Both map to `data`; the database is `part_of` its parent server.
+  - `azurerm_resource_group` is **intentionally excluded** from the
+    registry. It is purely organizational, has no
+    architectural-review value, and including it would clutter every
+    Azure diagram with an inert root node. References to it from
+    other resources simply do not produce edges (same warn-and-skip
+    behavior as `var.*` / `data.*` references today).
+- **3 new Azure-specific risk rules** (21 rules total). All three
+  follow the per-resource signal pattern locked in
+  `risk/rules.go` / `risk/rules_v12.go`: read literal attributes from
+  a single added node, never traverse the graph, never guess at
+  unresolved expressions, cap at `phase6CapPerRule = 2` reasons,
+  short-circuit on `isConditionalNode` (the v1.3 library-mode guard).
+  - `nsg_allow_all_ingress` (weight 3.5, impact `exposure`). Azure
+    analog of `nacl_allow_all_ingress`. Fires when an added
+    `azurerm_network_security_rule` has the literal trio
+    `source_address_prefix in {"*", "0.0.0.0/0"}`, `access = "Allow"`,
+    `direction = "Inbound"`. Variable-driven attributes never fire.
+  - `storage_account_public` (weight 4.0, impact `exposure`). Azure
+    analog of `s3_bucket_public_exposure`. Fires when an added
+    `azurerm_storage_account` has either literal
+    `public_network_access_enabled = true` OR
+    `allow_nested_items_to_be_public = true`. Default-false posture:
+    a missing attribute does NOT fire.
+  - `mssql_database_public` (weight 3.5, impact `data_exposure`).
+    Fires when an added `azurerm_mssql_server` has the literal flag
+    `public_network_access_enabled = true`. Caveat: the rule does
+    NOT cross-check whether an `azurerm_mssql_firewall_rule` scopes
+    public access (that would require graph traversal). Reviewers
+    who have scoped public access via firewall rules can suppress
+    this finding via `.architex.yml` or inline
+    `# architex:ignore=mssql_database_public`. Same pattern as
+    `s3_bucket_public_exposure`.
+- The five **cross-provider rules** (`new_entry_point`,
+  `new_data_resource`, `public_exposure_introduced`,
+  `potential_data_exposure`, `resource_removed`) and the three
+  **baseline rules** (`first_time_*`) require zero changes -- they
+  already key off abstract type and provider type, so they fire on
+  Azure as soon as the registry knows the new types. Net effective
+  rule coverage on Azure PRs: ~11 rules (3 new + 8 cross-provider).
+- New `examples/07-azure-public-lb/` (base + head + README) wired
+  into the existing examples-gallery selftest. Asserts the canonical
+  Azure "public LB + open NSG" anti-pattern lands at 6.5/medium with
+  exactly two findings.
+- New `testdata/azure_base/` + `testdata/azure_head/` and
+  `testdata/azure_storage_public_base/` +
+  `testdata/azure_storage_public_head/` fixture pairs. Used by the
+  unit tests as the Azure equivalent of the canonical
+  `top10_base/top10_head` AWS regression pair.
+- New `risk/rules_azure_test.go`, `parser` Azure-coverage tests, and
+  `graph` Azure-edge tests: positive / negative / conditional / cap
+  for each rule, plus an explicit "AWS nodes never fire Azure rules"
+  provider-isolation test.
+
+### Added (auto-detection UX)
+
+- **Provider banner** in the PR comment. A single deterministic info
+  line is rendered above the Plain-English Summary:
+
+  > _Detected providers: aws, azurerm — N resources analyzed._
+
+  Sourced from a one-pass count over the union of
+  `delta.AddedNodes ∪ RemovedNodes ∪ ChangedNodes`, extracting the
+  prefix before the first `_`, deduplicated, sorted alphabetically.
+  Purely cosmetic: it does NOT affect the score, the egress payload,
+  the risk reasons, or the Mermaid diagram. Single-provider PRs
+  render the banner anyway -- it tells AWS-only consumers that
+  auto-detection ran and confirms which provider was processed.
+  Empty deltas omit the banner.
+
+### What's deliberately NOT in v1.4
+
+- **No schema-driven azurerm parsing.** Same reasoning as the AWS
+  v1.0 release notes ("the bottleneck is abstract-type curation, not
+  attribute discovery"). Resource curation stays the gate.
+- **No Azure CLI / Azure Resource Manager network calls.** The
+  runner-local trust model from `master.md` §6 is non-negotiable.
+  Every literal we read comes from the `.tf` text via HCL.
+- **No AzureRM provider authentication code.** ArchiteX never
+  executes `terraform plan`, `terraform init`, or `az` -- it parses
+  the source and that is all.
+- **No Bicep / ARM template support.** Both are out of scope; v1.4
+  is `azurerm` (Terraform) only. Bicep would belong in a separate
+  "second IaC language" release that is the actual v2.0 trigger.
+- **No new abstract type.** `compute`, `data`, `entry_point`,
+  `network`, `access_control`, `storage`, `identity` cover every
+  Azure resource in this tranche.
+
+### Compatibility (the AWS bit-identical promise)
+
+- New entries in `models.SupportedResources` cannot affect AWS
+  resource matching (it is a hash lookup).
+- New entries in `graph.edgeTypeMap` cannot affect AWS edge inference
+  (same).
+- New `case` arms in `graph.deriveAttributes` and
+  `interpreter.focusForRule` are unreachable from AWS code paths.
+- The three new rules return `nil` immediately for any non-`azurerm_*`
+  node (locked in by `TestEvaluate_AzureRules_AWSNodes_NeverFire`).
+- The provider banner gracefully handles single-provider PRs (renders
+  as `Detected providers: aws` for an AWS-only PR -- additive but not
+  disruptive).
+- The locked AWS regression tests
+  (`TestEvaluateWith_NilConfig_BehavesAsV11`,
+  `TestEvaluate_HighRiskFixture_NoRegression`, the v1.2 / v1.3
+  fixture pairs, and the existing `examples/01-public-alb` …
+  `examples/06-lambda-public-url` selftest assertions) remain green.
+
 ## [1.3.1] - 2026-04-20
 
 Documentation, repo-hygiene, and CI-stability follow-up to v1.3.0. **No

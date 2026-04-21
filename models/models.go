@@ -126,6 +126,33 @@ var SupportedResources = map[string]bool{
 	"aws_launch_template":              true,
 	"aws_autoscaling_group":            true,
 	"aws_autoscaling_policy":           true,
+
+	// v1.4 -- Azure tranche-0 (Phase 9). First-class Azure (azurerm)
+	// support. Mirrors the AWS v1.0 canonical 3-tier scope: a virtual
+	// network with subnets, a network-security boundary (NSG + rule),
+	// public IPs and load balancers as the entry-point edge, Linux /
+	// Windows VMs as compute, a storage account as object-storage at
+	// rest, and an MSSQL server + database as the data tier. Network
+	// interfaces are included so VM topology renders faithfully (a VM
+	// without a NIC looks stranded in the diagram).
+	//
+	// `azurerm_resource_group` is INTENTIONALLY excluded -- it is purely
+	// organizational, has no architectural-review value, and including
+	// it would clutter every Azure diagram with an inert root node.
+	// References to it from other resources simply do not produce edges
+	// (same warn-and-skip behavior as `var.*` / `data.*` references).
+	"azurerm_virtual_network":         true,
+	"azurerm_subnet":                  true,
+	"azurerm_public_ip":               true,
+	"azurerm_network_security_group":  true,
+	"azurerm_network_security_rule":   true,
+	"azurerm_network_interface":       true,
+	"azurerm_linux_virtual_machine":   true,
+	"azurerm_windows_virtual_machine": true,
+	"azurerm_lb":                      true,
+	"azurerm_storage_account":         true,
+	"azurerm_mssql_server":            true,
+	"azurerm_mssql_database":          true,
 }
 
 // AbstractionMap maps AWS provider types to generic architecture types.
@@ -208,4 +235,29 @@ var AbstractionMap = map[string]string{
 	"aws_launch_template":              "compute",
 	"aws_autoscaling_group":            "compute",
 	"aws_autoscaling_policy":           "compute",
+
+	// v1.4 -- Phase 9 (Azure tranche-0). No new abstract types are
+	// introduced -- every Azure resource slots into one of the seven
+	// established roles. azurerm_lb and azurerm_public_ip are
+	// "entry_point" / "network" respectively; even though both can
+	// front public traffic, the LB is the architectural ingress and
+	// the public IP is the address-plane attachment that may flip
+	// from private to public. azurerm_network_interface is "network"
+	// because it is the wiring layer between VMs, subnets, and NSGs.
+	// azurerm_mssql_server is "data" alongside the database itself --
+	// the server is the public-network-access boundary, the database
+	// is the per-tenant data resource. azurerm_storage_account is
+	// "storage" (object storage at rest, sibling of S3).
+	"azurerm_virtual_network":         "network",
+	"azurerm_subnet":                  "network",
+	"azurerm_public_ip":               "network",
+	"azurerm_network_security_group":  "access_control",
+	"azurerm_network_security_rule":   "access_control",
+	"azurerm_network_interface":       "network",
+	"azurerm_linux_virtual_machine":   "compute",
+	"azurerm_windows_virtual_machine": "compute",
+	"azurerm_lb":                      "entry_point",
+	"azurerm_storage_account":         "storage",
+	"azurerm_mssql_server":            "data",
+	"azurerm_mssql_database":          "data",
 }

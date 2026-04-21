@@ -67,6 +67,7 @@ jobs:
             "04-cloudfront-no-waf|5.5|cloudfront_no_waf|"
             "05-library-mode|0.0||eks_public_endpoint"
             "06-lambda-public-url|6.0|lambda_public_url_introduced|"
+            "07-azure-public-lb|6.5|nsg_allow_all_ingress|"
           )
           for CASE in "${CASES[@]}"; do
             IFS='|' read -r DIR EXPECTED MUST_FIRE MUST_NOT_FIRE <<< "${CASE}"
@@ -90,7 +91,7 @@ jobs:
             fi
             echo "Example ${DIR}: score=${ACTUAL} (ok)"
           done
-          echo "All 6 examples produced their expected scores and rule sets."
+          echo "All 7 examples produced their expected scores and rule sets."
 
       - name: "Library-mode selftest (var.X ? 1 : 0 phantoms)"
         run: |

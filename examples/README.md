@@ -23,6 +23,7 @@ Open the resulting `.architex/<bundle>/report.html` in any browser (no JavaScrip
 | [04](./04-cloudfront-no-waf/) | CloudFront added without a WAF | `cloudfront_no_waf` (2.5) + `new_entry_point` (3.0) | 5.5 / **medium** |
 | [05](./05-library-mode/) | Module-author repo: `count = var.create ? 1 : 0` | **No rules fire** — phantoms are correctly silent | 0.0 / **low** |
 | [06](./06-lambda-public-url/) | Public Lambda URL introduced | `lambda_public_url_introduced` (3.0) + `new_entry_point` (3.0) | 6.0 / **medium** |
+| [07](./07-azure-public-lb/) | **Azure** public LB + open NSG (v1.4) | `nsg_allow_all_ingress` (3.5) + `new_entry_point` (3.0) | 6.5 / **medium** |
 
 ## What "deterministic" looks like
 

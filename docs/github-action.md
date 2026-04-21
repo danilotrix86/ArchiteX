@@ -27,14 +27,14 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.3.1
+      - uses: danilotrix86/ArchiteX@v1.4.0
         with:
           terraform-dir: infra
 ```
 
 That's it. Every PR touching `infra/*.tf` will get a sticky ArchiteX comment. Nothing fails the check.
 
-Pin to an exact version (`v1.3.1`, `v1.3.0`, `v1.2.0`, ...) -- see the [Versioning](#versioning) section below for why.
+Pin to an exact version (`v1.4.0`, `v1.3.1`, `v1.3.0`, `v1.2.0`, ...) -- see the [Versioning](#versioning) section below for why.
 
 ## Inputs
 
@@ -75,7 +75,7 @@ ArchiteX is meant to be adopted in three phases. The Action makes each one a one
 ### Phase 1 -- Visibility
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.1
+- uses: danilotrix86/ArchiteX@v1.4.0
   with:
     terraform-dir: infra
     mode: advisory     # default; never fails the check
@@ -90,7 +90,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 ### Phase 3 -- Enforced governance
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.1
+- uses: danilotrix86/ArchiteX@v1.4.0
   with:
     terraform-dir: infra
     mode: blocking     # exits non-zero when risk.Status == "fail"
@@ -141,7 +141,9 @@ You can verify the caps locally with `scripts/stress-mermaid.ps1` -- it generate
 
 ## Supported resources
 
-ArchiteX v1.3 recognises **45 AWS resource types** across seven abstract roles (network, access_control, compute, entry_point, data, storage, identity). The full table -- with the version each type landed in -- is the single source of truth in [README § Coverage](../README.md#-coverage). At a glance:
+ArchiteX v1.4 recognises **57 resource types** -- 45 AWS (`aws_*`) and 12 Azure (`azurerm_*`) -- across seven abstract roles (network, access_control, compute, entry_point, data, storage, identity). The provider is auto-detected per resource block; AWS-only repos see zero behavioral change. The full table -- with the version each type landed in -- is the single source of truth in [README § Coverage](../README.md#-coverage). At a glance:
+
+### AWS
 
 | Family | Examples | Abstract role |
 |---|---|---|
@@ -152,6 +154,27 @@ ArchiteX v1.3 recognises **45 AWS resource types** across seven abstract roles (
 | Data | `aws_db_instance`, `aws_sns_topic`, `aws_sqs_queue`, `aws_secretsmanager_secret` | `data` |
 | Storage | `aws_s3_bucket`, `aws_ebs_volume` | `storage` |
 | Identity | `aws_iam_role`, `aws_iam_policy`, `aws_iam_role_policy_attachment`, `aws_kms_key`, `aws_kms_alias`, `aws_eks_identity_provider_config` | `identity` |
+
+### Azure (since v1.4)
+
+| Family | Examples | Abstract role |
+|---|---|---|
+| Network | `azurerm_virtual_network`, `azurerm_subnet`, `azurerm_public_ip`, `azurerm_network_interface` | `network` |
+| Access control | `azurerm_network_security_group`, `azurerm_network_security_rule` | `access_control` |
+| Compute | `azurerm_linux_virtual_machine`, `azurerm_windows_virtual_machine` | `compute` |
+| Entry points | `azurerm_lb` | `entry_point` |
+| Data | `azurerm_mssql_server`, `azurerm_mssql_database` | `data` |
+| Storage | `azurerm_storage_account` | `storage` |
+
+`azurerm_resource_group` is intentionally excluded: it has no architectural-review value and references to it from other resources simply do not produce edges (same warn-and-skip behavior as `var.*` / `data.*`).
+
+When mixed-provider repos are analyzed, the PR comment opens with a deterministic banner:
+
+```
+_Detected providers: aws, azurerm — 27 resources analyzed._
+```
+
+The banner is omitted entirely when zero resources are touched in the delta.
 
 Unsupported resource types are logged as warnings (category `unsupported_resource`) and reduce the confidence score; they do not cause failures.
 
@@ -172,22 +195,25 @@ Unsupported resource types are logged as warnings (category `unsupported_resourc
 
 ## Limitations
 
-- AWS Terraform resources only (45 types as of v1.3 -- see [README § Coverage](../README.md#-coverage)). Broader provider and resource coverage continues each minor release.
+- Terraform only (`*.tf`). Bicep / ARM / Pulumi / CDK are out of scope for v1.
+- AWS (45 types) and Azure tranche-0 (12 `azurerm_*` types) as of v1.4 -- see [README § Coverage](../README.md#-coverage). Azure tranche-1 (Application Gateway, AKS, Cosmos DB, Key Vault, Function App, Front Door) and GCP are on the roadmap; broader provider and resource coverage continues each minor release.
 - The diagram shows one layer of dependencies (changed nodes plus direct edge endpoints); deeper expansion is on the roadmap.
-- Multi-provider, GitLab, Bitbucket, and non-Terraform IaC are out of scope for v1.
+- GitLab and Bitbucket are out of scope for v1.
 
 ## Versioning
 
-**Always pin to an exact, immutable version tag** (`v1.3.1`, `v1.3.0`, `v1.2.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
+**Always pin to an exact, immutable version tag** (`v1.4.0`, `v1.3.1`, `v1.3.0`, `v1.2.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.3.1
+- uses: danilotrix86/ArchiteX@v1.4.0
 ```
+
+The floating `v1` tag tracks the latest stable v1.x release. AWS-only repos can keep tracking `v1` -- v1.4 is purely additive (Azure types and rules are gated on `azurerm_*`, so the AWS path is bit-identical to v1.3).
 
 Pinning is recommended because:
 
 1. **Auditability.** A security-review tool that silently changes its own behaviour under your CI is a contradiction. Pinning means the rules you reviewed last week are the rules running today.
 2. **Reproducibility.** If a PR's score changes, you know it's because the Terraform changed -- not because ArchiteX changed.
-3. **Explicit upgrades.** When you bump `v1.3.1` -> `v1.4.0`, you read the [CHANGELOG](../CHANGELOG.md) and decide whether to take it.
+3. **Explicit upgrades.** When you bump `v1.4.0` -> `v1.5.0`, you read the [CHANGELOG](../CHANGELOG.md) and decide whether to take it.
 
 To upgrade, check the [Releases page](https://github.com/danilotrix86/ArchiteX/releases) and bump the tag in your workflow file. Renovate / Dependabot can automate the PRs.

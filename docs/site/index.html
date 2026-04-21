@@ -163,7 +163,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.3.1
+      - uses: danilotrix86/ArchiteX@v1.4.0
         with:
           terraform-dir: infra`;
 
@@ -173,7 +173,7 @@ function Hero() {
     const t = setInterval(() => setCaret(c => !c), 530);
     return () => clearInterval(t);
   }, []);
-  const stats = [['4','stages'],['45','AWS resources'],['18','risk rules'],['0 bytes','exfiltrated'],['v1.3','latest']];
+  const stats = [['4','stages'],['57','resources (AWS + Azure)'],['21','risk rules'],['0 bytes','exfiltrated'],['v1.4','latest']];
   return (
     <section style={{position:'relative',paddingTop:120,paddingBottom:96,paddingLeft:24,paddingRight:24,
       background:`radial-gradient(ellipse 1100px 550px at 50% -80px, ${ACCENT}0d 0%, transparent 65%)`}}>
@@ -551,16 +551,16 @@ Object.assign(window, { Defaults });
 <script type="text/babel">
 function Highlights() {
   const items = [
+    { tag:'v1.4', title:'Azure support, auto-detected',   body:'12 azurerm_* resources and 3 Azure-specific risk rules (NSG open ingress, public storage account, public MSSQL). The tool reads each resource block and applies the right rules — drop your Terraform in, AWS-only repos see zero behavioral change.' },
     { tag:'v1.3', title:'Library mode for module authors', body:'Resources gated behind count = var.create ? 1 : 0 render as conditional phantoms in the diagram. Per-resource rules short-circuit on them — no false positives on conditional gates.' },
     { tag:'v1.2', title:'Self-contained HTML report',     body:'Every run produces a report.html with no JavaScript, no CDN, no remote fonts. Open it in an air-gapped browser and see the full review with severity badges, reasons, suppressions, the Mermaid diagram, and a SHA-256 manifest.' },
-    { tag:'v1.2', title:'Baseline anomaly detection',     body:'Optional .architex/baseline.json records the kinds of resources your repo has ever contained — no raw HCL, no names. Novel additions surface as low-weight signals that layer on top of the existing rules.' },
   ];
   return (
     <section style={{padding:'80px 24px',borderTop:'1px solid #222'}}>
       <div style={{maxWidth:1120,margin:'0 auto'}}>
         <SectionLabel>What's new</SectionLabel>
         <h2 style={{fontSize:'clamp(24px,3vw,36px)',fontWeight:700,letterSpacing:'-0.03em',color:'#ededed',marginBottom:8}}>Built for module authors and regulated teams</h2>
-        <p style={{fontSize:14,color:'#888',marginBottom:48,maxWidth:620}}>v1.3 adds EKS, Auto Scaling, and RDS-groups support, plus library-mode parsing and conditional-phantom rendering. Earlier releases shipped the depth and air-gapped review machinery that makes any of this trustworthy.</p>
+        <p style={{fontSize:14,color:'#888',marginBottom:48,maxWidth:620}}>v1.4 adds first-class Azure support (12 azurerm_* resources, 3 Azure-specific risk rules) on top of the v1.3 AWS scope. The tool auto-detects which provider each resource uses; AWS-only repos are bit-identical to v1.3.</p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:1,background:'#242424',border:'1px solid #242424',borderRadius:6,overflow:'hidden'}}>
           {items.map((p,i)=>(
             <div key={i} style={{background:'#0a0a0a',padding:'28px 24px',transition:'background 0.15s'}}
@@ -691,7 +691,7 @@ const { IconCopy: Copy, IconCheck: CheckIcon, IconGithub: GH } = window;
 
 function FinalCTA() {
   const [copied, setCopied] = React.useState(false);
-  const YAML = `name: ArchiteX\non:\n  pull_request:\npermissions:\n  contents: read\n  pull-requests: write\njobs:\n  architex:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: danilotrix86/ArchiteX@v1.3.1\n        with:\n          terraform-dir: infra`;
+  const YAML = `name: ArchiteX\non:\n  pull_request:\npermissions:\n  contents: read\n  pull-requests: write\njobs:\n  architex:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: danilotrix86/ArchiteX@v1.4.0\n        with:\n          terraform-dir: infra`;
   const copy = () => { navigator.clipboard.writeText(YAML).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); }); };
   return (
     <section id="install" style={{padding:'96px 24px',borderTop:'1px solid #222',textAlign:'center'}}>
@@ -708,7 +708,7 @@ function FinalCTA() {
             </button>
           </div>
           <pre style={{margin:0,padding:'14px 20px',fontFamily:'"JetBrains Mono",monospace',fontSize:12,lineHeight:1.7,overflowX:'auto',textAlign:'left'}}>
-            <span style={{color:'#555'}}>      - </span><span style={{color:'#79c0ff'}}>uses</span><span style={{color:'#555'}}>: </span><span style={{color:'#a5d6ff'}}>danilotrix86/ArchiteX</span><span style={{color:ACCENT}}>@v1.3.1</span>{'\n'}
+            <span style={{color:'#555'}}>      - </span><span style={{color:'#79c0ff'}}>uses</span><span style={{color:'#555'}}>: </span><span style={{color:'#a5d6ff'}}>danilotrix86/ArchiteX</span><span style={{color:ACCENT}}>@v1.4.0</span>{'\n'}
             <span style={{color:'#555'}}>        </span><span style={{color:'#79c0ff'}}>with</span><span style={{color:'#555'}}>:</span>{'\n'}
             <span style={{color:'#555'}}>          </span><span style={{color:'#79c0ff'}}>terraform-dir</span><span style={{color:'#555'}}>: </span><span style={{color:'#a5d6ff'}}>infra</span>
           </pre>
@@ -762,9 +762,9 @@ function FAQ() {
   const [open, setOpen] = React.useState(null);
   const items = [
     { q:'Does it support Terraform modules?',
-      a:'Yes. The v1.2 parser handles modules, count, for_each, and dynamic blocks. v1.3 adds a dedicated library mode for module-author repos: resources gated behind count = var.create ? 1 : 0 render as conditional phantoms in the diagram and per-resource rules short-circuit on them.' },
+      a:'Yes. The v1.2 parser handles modules, count, for_each, and dynamic blocks. v1.3 added a dedicated library mode for module-author repos: resources gated behind count = var.create ? 1 : 0 render as conditional phantoms in the diagram and per-resource rules short-circuit on them. v1.4 keeps all of this and extends auto-detection across both AWS and Azure resources.' },
     { q:'AWS only?',
-      a:'AWS in v1.x — 45 resource types as of v1.3. Multi-provider (Azure, GCP) is on the roadmap. Unsupported resource types emit a warning and reduce the confidence score; they never cause failures.' },
+      a:'AWS and Azure in v1.4 — 45 aws_* and 12 azurerm_* resource types (57 total). The provider is auto-detected per resource block; mixed AWS+Azure repos work out of the box. GCP is on the roadmap. Unsupported resource types emit a warning and reduce the confidence score; they never cause failures.' },
     { q:'How is this different from Snyk IaC / Checkov / tfsec?',
       a:'Those find resource-level misconfigurations (open ports, missing encryption). ArchiteX finds architectural changes — new public entry point, expanded blast radius, crossed trust boundary — that resource-level scanners structurally cannot see. Run them together: they are complementary, not overlapping.' },
     { q:'Can I customize the rules?',

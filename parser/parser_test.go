@@ -698,6 +698,85 @@ resource "aws_instance" "x" {
 	}
 }
 
+// TestParseDir_AzureBaseResources_AllRecognized is the Phase 9 (v1.4)
+// parser-coverage test for the Azure tranche-0 resource set. Mirrors
+// TestParseDir_Phase6Resources_AllRecognized / Tranche2 / Tranche3.
+//
+// It parses testdata/azure_base + the head fixture's net-new resources,
+// asserts no `unsupported_resource` warnings, and confirms each registered
+// azurerm_* type is actually picked up. azurerm_resource_group is
+// intentionally NOT in the registry, so a reference to it must NOT
+// produce an unsupported_resource warning either (it's a `var.*`-shaped
+// silent skip).
+func TestParseDir_AzureResources_AllRecognized(t *testing.T) {
+	resources, warnings, err := ParseDir("../testdata/azure_head")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if w.Category == models.WarnUnsupportedResource {
+			t.Errorf("unexpected unsupported_resource warning: %s", w.Message)
+		}
+	}
+
+	expected := []string{
+		"azurerm_virtual_network.main",
+		"azurerm_subnet.main",
+		"azurerm_network_security_group.main",
+		"azurerm_network_security_rule.open_world",
+		"azurerm_public_ip.lb",
+		"azurerm_lb.front",
+		"azurerm_mssql_server.main",
+		"azurerm_mssql_server.public_app",
+		"azurerm_mssql_database.app",
+	}
+	for _, id := range expected {
+		if findResource(resources, id) == nil {
+			t.Errorf("Azure resource %s was not parsed", id)
+		}
+	}
+}
+
+// TestParseDir_AzureResources_LiteralAttributesPromoted verifies the
+// per-resource attributes that the Azure rules read survive the parser
+// -> graph round-trip.
+//
+// The graph derivation step is what actually promotes these to
+// Node.Attributes; the parser only captures them as raw resource
+// attributes. We verify the raw form here -- the graph-side promotion
+// is locked in by graph/graph_test.go.
+func TestParseDir_AzureResources_LiteralAttributesPromoted(t *testing.T) {
+	resources, _, err := ParseDir("../testdata/azure_head")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rule := findResource(resources, "azurerm_network_security_rule.open_world")
+	if rule == nil {
+		t.Fatal("azurerm_network_security_rule.open_world not parsed")
+	}
+	if got, _ := rule.Attributes["source_address_prefix"].(string); got != "*" {
+		t.Errorf("expected source_address_prefix=\"*\", got %v", rule.Attributes["source_address_prefix"])
+	}
+	if got, _ := rule.Attributes["access"].(string); got != "Allow" {
+		t.Errorf("expected access=\"Allow\", got %v", rule.Attributes["access"])
+	}
+	if got, _ := rule.Attributes["direction"].(string); got != "Inbound" {
+		t.Errorf("expected direction=\"Inbound\", got %v", rule.Attributes["direction"])
+	}
+
+	server := findResource(resources, "azurerm_mssql_server.public_app")
+	if server == nil {
+		t.Fatal("azurerm_mssql_server.public_app not parsed")
+	}
+	if got, ok := server.Attributes["public_network_access_enabled"].(bool); !ok || !got {
+		t.Errorf("expected public_network_access_enabled=true, got %v (%T)",
+			server.Attributes["public_network_access_enabled"],
+			server.Attributes["public_network_access_enabled"])
+	}
+}
+
 // hasUnsupportedConstructWarning returns true when the warnings slice
 // contains an unsupported_construct warning whose Message contains substr.
 func hasUnsupportedConstructWarning(warns []models.Warning, substr string) bool {

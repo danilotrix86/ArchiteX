@@ -321,8 +321,10 @@ This sequence preserves developer trust while enabling an eventual control postu
 | Distribution | GitHub Action + (planned) GitHub App |
 | Execution | Customer's CI runner — local-first |
 | IaC language | Terraform |
-| Cloud target | AWS |
+| Cloud target | **AWS** (45 resources, since v1.0) and **Azure** (12 `azurerm_*` resources, tranche-0, since v1.4) — auto-detected per resource block |
 | Review surface | Pull Requests |
+
+Multi-provider behavior is automatic: ArchiteX inspects the literal `resource "<type>" "<name>"` in every parsed `.tf` file, looks the type up in a single registry (`models.SupportedResources` + `models.AbstractionMap`), and applies whichever rules are appropriate. AWS-only repos see zero behavioral change in v1.4; Azure-only and mixed repos see exactly the same risk score, summary, and Mermaid diagram, plus a deterministic provider banner (`_Detected providers: aws, azurerm — N resources analyzed._`) at the top of the PR comment.
 
 ### 8.2 Explicitly out of scope (for now)
 
@@ -340,10 +342,11 @@ The current scope is tightly focused: catch risky Terraform AWS architectural ch
 
 ### 8.3 Future roadmap
 
-Once the core experience is solid, expansion proceeds carefully along four axes:
+Once the core experience is solid, expansion proceeds carefully along five axes:
 
+- **Cloud providers:** Azure tranche-1 (Application Gateway, AKS, Cosmos DB, Key Vault, Function App, Front Door), then GCP. Each new provider follows the v1.4 multi-provider pattern — register types, map to abstract roles, derive a small set of literal attributes, add provider-specific risk rules where existing cross-provider rules don't already cover the case.
 - **Ecosystem:** GitLab, Bitbucket, generic API ingestion.
-- **IaC:** Helm / Kubernetes, Pulumi, AWS CDK.
+- **IaC:** Helm / Kubernetes, Pulumi, AWS CDK, Bicep / ARM (a natural fit once Azure tranche-1 is in).
 - **Visualization:** richer layout, interactive graph exploration, layered views, zoomable DAG.
 - **Intelligence:** temporal anomaly detection, drift trend reporting, organization-wide architectural posture scoring, approval workflows and exceptions.
 

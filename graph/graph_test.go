@@ -689,6 +689,163 @@ func TestBuild_Phase6_IAMAttachment_PolicyARNPassthrough(t *testing.T) {
 	}
 }
 
+// TestBuild_Phase9_AzureDerivedAttributesAndEdges locks in the Phase 9
+// (v1.4) Azure tranche-0 contract. Mirrors the Phase 6 / Phase 8
+// equivalents above. If a future PR rearranges the Azure entries in
+// graph.edgeTypeMap or graph.deriveAttributes, this test is the
+// breaker.
+func TestBuild_Phase9_AzureDerivedAttributesAndEdges(t *testing.T) {
+	resources := []models.RawResource{
+		{Type: "azurerm_virtual_network", Name: "main", ID: "azurerm_virtual_network.main"},
+		{
+			Type: "azurerm_subnet", Name: "main", ID: "azurerm_subnet.main",
+			References: []models.Reference{
+				{SourceAttr: "virtual_network_name", TargetID: "azurerm_virtual_network.main"},
+			},
+		},
+		{Type: "azurerm_network_security_group", Name: "main", ID: "azurerm_network_security_group.main"},
+		{
+			Type: "azurerm_network_security_rule", Name: "open",
+			ID: "azurerm_network_security_rule.open",
+			Attributes: map[string]any{
+				"source_address_prefix": "*",
+				"access":                "Allow",
+				"direction":             "Inbound",
+			},
+			References: []models.Reference{
+				{SourceAttr: "network_security_group_name", TargetID: "azurerm_network_security_group.main"},
+			},
+		},
+		{
+			Type: "azurerm_network_security_rule", Name: "deny",
+			ID: "azurerm_network_security_rule.deny",
+			Attributes: map[string]any{
+				"source_address_prefix": "10.0.0.0/8",
+				"access":                "Allow",
+				"direction":             "Inbound",
+			},
+			References: []models.Reference{
+				{SourceAttr: "network_security_group_name", TargetID: "azurerm_network_security_group.main"},
+			},
+		},
+		{Type: "azurerm_public_ip", Name: "lb", ID: "azurerm_public_ip.lb"},
+		{
+			Type: "azurerm_lb", Name: "front", ID: "azurerm_lb.front",
+			References: []models.Reference{
+				{SourceAttr: "public_ip_address_id", TargetID: "azurerm_public_ip.lb"},
+				{SourceAttr: "subnet_id", TargetID: "azurerm_subnet.main"},
+			},
+		},
+		{
+			Type: "azurerm_storage_account", Name: "open",
+			ID: "azurerm_storage_account.open",
+			Attributes: map[string]any{
+				"public_network_access_enabled": true,
+			},
+		},
+		{
+			Type: "azurerm_storage_account", Name: "private",
+			ID: "azurerm_storage_account.private",
+			Attributes: map[string]any{
+				"public_network_access_enabled":   false,
+				"allow_nested_items_to_be_public": false,
+			},
+		},
+		{
+			Type: "azurerm_mssql_server", Name: "public",
+			ID: "azurerm_mssql_server.public",
+			Attributes: map[string]any{
+				"public_network_access_enabled": true,
+			},
+		},
+		{
+			Type: "azurerm_mssql_database", Name: "app",
+			ID: "azurerm_mssql_database.app",
+			References: []models.Reference{
+				{SourceAttr: "server_id", TargetID: "azurerm_mssql_server.public"},
+			},
+		},
+	}
+
+	g := Build(resources, nil)
+
+	nodeMap := make(map[string]models.Node, len(g.Nodes))
+	for _, n := range g.Nodes {
+		nodeMap[n.ID] = n
+	}
+
+	mustAttr := func(id, key string, want any) {
+		t.Helper()
+		n, ok := nodeMap[id]
+		if !ok {
+			t.Errorf("missing node %s", id)
+			return
+		}
+		got, exists := n.Attributes[key]
+		if !exists {
+			t.Errorf("node %s: attribute %q not promoted", id, key)
+			return
+		}
+		if got != want {
+			t.Errorf("node %s: attribute %q = %v (%T); want %v (%T)",
+				id, key, got, got, want, want)
+		}
+	}
+
+	// LB and public IP should be hard-coded public:true.
+	mustAttr("azurerm_lb.front", "public", true)
+	mustAttr("azurerm_public_ip.lb", "public", true)
+
+	// VNet/subnet/NSG should default to public:false.
+	mustAttr("azurerm_virtual_network.main", "public", false)
+	mustAttr("azurerm_subnet.main", "public", false)
+	mustAttr("azurerm_network_security_group.main", "public", false)
+
+	// NSG rule promotion -- the "open" rule trips the public:true derivation.
+	mustAttr("azurerm_network_security_rule.open", "source_address_prefix", "*")
+	mustAttr("azurerm_network_security_rule.open", "access", "Allow")
+	mustAttr("azurerm_network_security_rule.open", "direction", "Inbound")
+	mustAttr("azurerm_network_security_rule.open", "public", true)
+	// The scoped rule should land as public:false even though access=Allow.
+	mustAttr("azurerm_network_security_rule.deny", "public", false)
+
+	// Storage account flag promotion.
+	mustAttr("azurerm_storage_account.open", "public_network_access_enabled", true)
+	mustAttr("azurerm_storage_account.open", "public", true)
+	mustAttr("azurerm_storage_account.private", "public", false)
+
+	// MSSQL server flag promotion.
+	mustAttr("azurerm_mssql_server.public", "public_network_access_enabled", true)
+	mustAttr("azurerm_mssql_server.public", "public", true)
+
+	// Edges: the v1.4 azurerm_* arms in edgeTypeMap.
+	edgeSet := make(map[string]string, len(g.Edges))
+	for _, e := range g.Edges {
+		edgeSet[e.From+"|"+e.To] = e.Type
+	}
+	edgeCases := []struct {
+		from, to, edgeType string
+	}{
+		{"azurerm_subnet.main", "azurerm_virtual_network.main", "part_of"},
+		{"azurerm_network_security_rule.open", "azurerm_network_security_group.main", "applies_to"},
+		{"azurerm_network_security_rule.deny", "azurerm_network_security_group.main", "applies_to"},
+		{"azurerm_lb.front", "azurerm_public_ip.lb", "attached_to"},
+		{"azurerm_lb.front", "azurerm_subnet.main", "deployed_in"},
+		{"azurerm_mssql_database.app", "azurerm_mssql_server.public", "part_of"},
+	}
+	for _, c := range edgeCases {
+		got, ok := edgeSet[c.from+"|"+c.to]
+		if !ok {
+			t.Errorf("missing edge %s -> %s", c.from, c.to)
+			continue
+		}
+		if got != c.edgeType {
+			t.Errorf("edge %s -> %s: expected type %q, got %q",
+				c.from, c.to, c.edgeType, got)
+		}
+	}
+}
+
 func TestBuild_EdgeDeduplication(t *testing.T) {
 	resources := []models.RawResource{
 		{

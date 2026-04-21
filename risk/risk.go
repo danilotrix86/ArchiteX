@@ -117,6 +117,14 @@ func EvaluateWithBaseline(d delta.Delta, cfg *config.Config, base *baseline.Base
 	reasons = append(reasons, evaluateEKSNoLogging(d)...)
 	reasons = append(reasons, evaluateASGUnrestrictedScaling(d)...)
 
+	// Phase 9 (v1.4) — Azure tranche-0 rules. Each rule short-circuits
+	// on non-azurerm_* nodes so AWS-only repositories see zero added
+	// work and produce bit-identical output to v1.3 (locked by the
+	// existing AWS regression tests).
+	reasons = append(reasons, evaluateNSGAllowAllIngress(d)...)
+	reasons = append(reasons, evaluateStorageAccountPublic(d)...)
+	reasons = append(reasons, evaluateMSSQLDatabasePublic(d)...)
+
 	// Phase 7 PR5 (v1.2) — Baseline anomaly rules. Skipped entirely when
 	// no baseline exists; this preserves the v1.1 zero-config invariant.
 	reasons = append(reasons, evaluateFirstTimeResourceType(d, base)...)

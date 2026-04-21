@@ -181,7 +181,7 @@ func runReport(args []string) int {
 	}
 	d := delta.Compare(base, head)
 	result := risk.EvaluateWithBaseline(d, cfg, bl, time.Now())
-	rep := interpreter.Render(d, result, nil)
+	rep := interpreter.RenderWithGraph(d, result, head, nil)
 
 	logRisk(result)
 
@@ -228,7 +228,7 @@ func runSanitize(args []string) int {
 	}
 	d := delta.Compare(base, head)
 	result := risk.EvaluateWithBaseline(d, cfg, bl, time.Now())
-	rep := interpreter.Render(d, result, nil)
+	rep := interpreter.RenderWithGraph(d, result, head, nil)
 	payload := interpreter.Sanitize(rep, interpreter.SanitizationPolicy{HashSalt: *salt})
 
 	fmt.Fprintf(os.Stderr, "[architex] egress payload schema=%s severity=%s status=%s\n",

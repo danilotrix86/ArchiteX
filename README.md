@@ -34,7 +34,7 @@ ArchiteX is a **drop-in GitHub Action** that reads the Terraform diff in a Pull 
 
 Everything runs on your own GitHub Actions runner. **Raw Terraform never leaves the runner.** No SaaS, no telemetry, no paid tier, no account.
 
-> **v1.3 ships today** — 45 supported AWS resources, 18 risk rules, library-mode parsing for module-author repos, and a self-contained HTML report you can open in an air-gapped browser. [See the changelog →](CHANGELOG.md)
+> **v1.4 ships today** — first-class **Azure** support (12 `azurerm_*` resources, 3 Azure-specific risk rules) on top of the existing 45-resource AWS coverage. The tool **auto-detects** which provider your `.tf` files use; AWS-only repos see zero behavioral change. [See the changelog →](CHANGELOG.md)
 
 ---
 
@@ -52,7 +52,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.3.1
+      - uses: danilotrix86/ArchiteX@v1.4.0
         with:
           terraform-dir: infra
 ```
@@ -159,24 +159,22 @@ Every stage is **fully deterministic**. The Interpreter is template-based — no
 
 ---
 
-## 🆕 What's new in v1.3
+## 🆕 What's new in v1.4
 
-- **EKS, Auto Scaling, RDS-groups support** — `aws_eks_cluster`, `aws_eks_node_group`, `aws_eks_addon`, `aws_eks_fargate_profile`, `aws_eks_identity_provider_config`, `aws_db_subnet_group`, `aws_db_parameter_group`, `aws_db_option_group`, `aws_launch_template`, `aws_autoscaling_group`, `aws_autoscaling_policy`. **45 AWS resources total.**
-- **3 new risk rules** — `eks_public_endpoint`, `eks_no_logging`, `asg_unrestricted_scaling`. **18 deterministic rules total.**
-- **Library mode** — opt-in parser mode for module-author repos. Resources gated behind `count = var.create ? 1 : 0` (and `length(var.x) > 0 ? 1 : 0`) are now materialized as **conditional phantoms** marked `?` in the diagram. Risk rules refuse to score them, so phantoms never produce false positives. Enable in `.architex.yml`:
-  ```yaml
-  parser:
-    mode: library     # consumer (default) | library
-  ```
-- **Selftest hardening** — every fixture (Tranche-1, Tranche-2, Tranche-3, library-mode) is a regression check in CI. Anything that quietly changes the rendered output now fails the build.
+- **Azure support (Phase 9, tranche-0)** — 12 new `azurerm_*` resource types covering the canonical 3-tier Azure scope: `azurerm_virtual_network`, `azurerm_subnet`, `azurerm_public_ip`, `azurerm_network_interface`, `azurerm_network_security_group`, `azurerm_network_security_rule`, `azurerm_linux_virtual_machine`, `azurerm_windows_virtual_machine`, `azurerm_lb`, `azurerm_storage_account`, `azurerm_mssql_server`, `azurerm_mssql_database`. **57 resources total** (45 AWS + 12 Azure).
+- **3 new Azure-specific risk rules** — `nsg_allow_all_ingress` (3.5), `storage_account_public` (4.0), `mssql_database_public` (3.5). Same per-resource signal pattern, same `phase6CapPerRule` cap, same library-mode `isConditionalNode` guard as the AWS rules. **21 deterministic rules total.**
+- **Auto-detection** — drop your Terraform into a repo and ArchiteX recognizes whether each resource is `aws_*` or `azurerm_*` and applies the right rules accordingly. The PR comment now opens with a deterministic provider banner: `_Detected providers: aws, azurerm — N resources analyzed._`
+- **Cross-provider rules apply automatically.** The five abstract-type rules (`new_entry_point`, `new_data_resource`, `public_exposure_introduced`, `potential_data_exposure`, `resource_removed`) and the three baseline `first_time_*` rules already key off abstract type, so they fire on Azure as soon as the registry knows the new types — no rewrite needed.
+- **AWS bit-identical promise.** Every existing AWS regression test (`TestEvaluateWith_NilConfig_BehavesAsV11`, `TestEvaluate_HighRiskFixture_NoRegression`, all six `examples/01-public-alb` … `examples/06-lambda-public-url` selftest assertions) remains green. The three new Azure rules return `nil` immediately for any non-`azurerm_*` node (locked in by `TestEvaluate_AzureRules_AWSNodes_NeverFire`).
+- **New example: `examples/07-azure-public-lb/`** — the canonical Azure "public LB + open NSG" anti-pattern, wired into the examples-gallery selftest. The cross-provider equivalent of [example 01 (public ALB)](examples/01-public-alb/).
 
-[Full v1.3 changelog →](CHANGELOG.md)
+[Full v1.4 changelog →](CHANGELOG.md)
 
 ---
 
 ## 📦 Coverage
 
-**45 AWS resource types**, organized into a small set of abstract architectural roles:
+**57 resource types** across two providers (AWS + Azure), organized into a small set of abstract architectural roles:
 
 | Family | Resources | Since |
 |---|---|---|
@@ -189,11 +187,24 @@ Every stage is **fully deterministic**. The Interpreter is template-based — no
 | **Identity** | `aws_iam_role`, `aws_iam_policy`, `aws_iam_role_policy_attachment`, `aws_kms_key`, `aws_kms_alias`, `aws_eks_identity_provider_config` | v1.1 – v1.3 |
 | **Network (specialized)** | `aws_db_subnet_group` | v1.3 |
 
+### Azure coverage (v1.4)
+
+| Family | Resources | Since |
+|---|---|---|
+| **Network** | `azurerm_virtual_network`, `azurerm_subnet`, `azurerm_public_ip`, `azurerm_network_interface` | v1.4 |
+| **Access control** | `azurerm_network_security_group`, `azurerm_network_security_rule` | v1.4 |
+| **Compute** | `azurerm_linux_virtual_machine`, `azurerm_windows_virtual_machine` | v1.4 |
+| **Entry points** | `azurerm_lb` | v1.4 |
+| **Storage** | `azurerm_storage_account` | v1.4 |
+| **Data** | `azurerm_mssql_server`, `azurerm_mssql_database` | v1.4 |
+
+`azurerm_resource_group` is **intentionally excluded** — it is purely organizational, has no architectural-review value, and including it would clutter every Azure diagram with an inert root node. References to it from other resources simply do not produce edges (same warn-and-skip behavior as `var.*` / `data.*`).
+
 Unsupported resource types emit a warning and slightly reduce the confidence score — they never cause failures.
 
 The parser also expands **local module recursion**, **literal `count` / `for_each` / `dynamic` blocks**, **`data.aws_iam_policy.x.arn` resolution**, and **`jsonencode({...})` policy bodies** — see [docs/github-action.md](docs/github-action.md) for the full surface.
 
-### 18 deterministic risk rules
+### 21 deterministic risk rules
 
 Each rule contributes a fixed weight (capped at 10.0). Reviewer-facing names are stable across versions.
 
@@ -201,10 +212,13 @@ Each rule contributes a fixed weight (capped at 10.0). Reviewer-facing names are
 |---|---:|---|---|
 | `public_exposure_introduced` | 4.0 | A node's `public` attribute changes from `false` to `true`. | v1.0 |
 | `s3_bucket_public_exposure` | 4.0 | An `aws_s3_bucket_public_access_block` is removed, OR a permissive bucket policy is added. | v1.1 |
+| `storage_account_public` | 4.0 | An `azurerm_storage_account` is added with `public_network_access_enabled = true` or `allow_nested_items_to_be_public = true`. | v1.4 |
 | `eks_public_endpoint` | 3.5 | An `aws_eks_cluster` is added with `vpc_config.endpoint_public_access = true` and **no** CIDR allow-list. | v1.3 |
 | `iam_admin_policy_attached` | 3.5 | A role policy attachment binds `AdministratorAccess` or `IAMFullAccess`. | v1.1 |
 | `messaging_topic_public` | 3.5 | An added SNS/SQS policy has `Allow … Principal = "*"`. | v1.2 |
 | `nacl_allow_all_ingress` | 3.5 | A NACL rule allows `0.0.0.0/0` ingress with literal `allow`. | v1.2 |
+| `nsg_allow_all_ingress` | 3.5 | An `azurerm_network_security_rule` allows `*` / `0.0.0.0/0` inbound with literal `Allow`. | v1.4 |
+| `mssql_database_public` | 3.5 | An `azurerm_mssql_server` is added with `public_network_access_enabled = true`. | v1.4 |
 | `new_entry_point` | 3.0 | An added node has abstract type `entry_point`. | v1.0 |
 | `lambda_public_url_introduced` | 3.0 | A `lambda_function_url` is added (layers on `new_entry_point`). | v1.1 |
 | `ebs_volume_unencrypted` | 3.0 | An EBS volume has explicit literal `encrypted = false`. | v1.2 |
@@ -319,8 +333,9 @@ See [master.md §6](master.md#6-trust-model-and-data-sanitization) for the full 
 - **v1.0** — Canonical 3-tier AWS scope (VPC, subnets, SGs, EC2, ALB, RDS).
 - **v1.1** — AWS Top 10 expansion (S3, IAM, Lambda, API Gateway v2). 17 resources, 8 rules.
 - **v1.2** — Depth & configurability: parser depth (modules, count, for_each, dynamic), `.architex.yml`, baseline anomaly detection, self-contained HTML report. 34 resources, 15 rules.
-- **v1.3** — *(this release)* EKS + Auto Scaling + RDS groups, library-mode parsing, conditional-phantom rendering, hardened selftest. **45 resources, 18 rules.**
-- **Future** — Multi-provider support (Azure / GCP first), GitLab + Bitbucket adapters, non-Terraform IaC. See [master.md §8](master.md#8-scope-and-roadmap).
+- **v1.3** — EKS + Auto Scaling + RDS groups, library-mode parsing, conditional-phantom rendering, hardened selftest. 45 AWS resources, 18 rules.
+- **v1.4** — *(this release)* **Multi-provider, auto-detected.** First-class Azure tranche-0 (12 `azurerm_*` resources, 3 Azure-specific risk rules) layered on top of the AWS scope without touching it. **57 resources, 21 rules.**
+- **Future** — Azure tranche-1 (Application Gateway, AKS, Cosmos DB, Key Vault), GCP, GitLab + Bitbucket adapters, non-Terraform IaC. See [master.md §8](master.md#8-scope-and-roadmap).
 
 ---
 
