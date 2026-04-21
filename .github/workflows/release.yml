@@ -10,11 +10,20 @@ name: Release
 #   3. attaches the archives + checksums.txt to the GitHub release page;
 #   4. uses CHANGELOG.md as the release body so users always see the
 #      hand-curated, version-by-version notes.
+#
+# Trigger pattern note (post-v1.4.0 incident):
+# We deliberately match `v*.*.*` (semver triple) rather than `v*`. This
+# means pushing the floating `v1` tag does NOT fire a release workflow,
+# which prevents a parallel-publish race where two goreleaser jobs (one
+# for `v1.4.0` and one for `v1`, pushed seconds apart) try to upload
+# identical assets to the same GitHub Release and one of them fails with
+# `422 already_exists`. The floating `v1` tag is now a pure pointer with
+# no CI side-effects -- exactly what a floating tag should be.
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
 
 permissions:
   contents: write
