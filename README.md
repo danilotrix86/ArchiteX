@@ -238,17 +238,24 @@ Each rule contributes a fixed weight (capped at 10.0). Reviewer-facing names are
 
 ## ⚙️ Configuration (optional)
 
-Drop a `.architex.yml` at the root of your Terraform directory to tune the engine. Every field is optional; an absent file reproduces v1.2 behavior bit-for-bit.
+Drop a `.architex.yml` at the root of your Terraform directory to tune the engine. Every field is optional; an absent file reproduces v1.2 behavior bit-for-bit. The configuration layer is **provider-agnostic**: the same `rules:`, `thresholds:`, `ignore:`, and `suppressions:` mechanisms apply identically to AWS rules, Azure rules, and any rule that lands in future minor releases.
 
 ```yaml
 parser:
   mode: library              # consumer (default) | library  -- v1.3
 
 rules:
+  # AWS rule overrides
   iam_admin_policy_attached:
     weight: 5.0              # bump default 3.5 -> 5.0
   s3_bucket_public_exposure:
     enabled: false           # silence the rule entirely
+
+  # Azure rule overrides (v1.4) -- same shape, same semantics
+  storage_account_public:
+    weight: 6.0              # treat public storage accounts as fail-grade
+  nsg_allow_all_ingress:
+    enabled: false           # accepted by design (e.g. all VMs are behind a managed bastion)
 
 thresholds:
   warn: 3.0                  # >= warn -> medium / warn (default 3.0)
@@ -264,6 +271,16 @@ suppressions:
     reason: "Maintenance lambda; auth type is AWS_IAM"
     expires: "2026-12-31"    # expired entries still drop the rule
                              # but get an (EXPIRED) flag in the PR comment
+
+  # Azure suppressions look identical -- glob match works on Azure IDs too
+  - rule: mssql_database_public
+    resource: azurerm_mssql_server.public_reporting
+    reason: "Behind Azure firewall + Conditional Access; reviewed 2026-Q1"
+    expires: "2026-12-31"
+  - rule: storage_account_public
+    resource: azurerm_storage_account.legacy_*
+    reason: "Legacy hosting buckets; migration tracked in TICKET-1234"
+    expires: "2026-09-30"
 ```
 
 You can also place inline directives directly above a resource block:
@@ -273,9 +290,17 @@ You can also place inline directives directly above a resource block:
 resource "aws_s3_bucket_policy" "docs" {
   ...
 }
+
+# architex:ignore=storage_account_public reason="Public CDN origin, expires=2026-09-30"
+resource "azurerm_storage_account" "public_assets" {
+  public_network_access_enabled = true
+  ...
+}
 ```
 
 Suppressed findings are **never silent**: they appear in a dedicated **Suppressed Findings** section in the PR comment with their reason and source.
+
+The three Azure rule IDs configurable today (v1.4): `nsg_allow_all_ingress` (3.5), `storage_account_public` (4.0), `mssql_database_public` (3.5). Cross-provider rules — `new_entry_point`, `new_data_resource`, `public_exposure_introduced`, `potential_data_exposure`, `resource_removed` — are configured by the same rule IDs whether they fire on AWS or Azure resources.
 
 ### Baseline anomaly detection
 

@@ -68,6 +68,105 @@ permissions:
 
 If you only want the artifact and no PR comment, you can drop `pull-requests: write` and set `comment: false`.
 
+## Configuration (`.architex.yml`)
+
+Drop a `.architex.yml` at the root of your Terraform directory (or anywhere `architex` is invoked from) to tune the engine. Every field is optional; an absent file reproduces the default scoring exactly. The Action picks the file up automatically — there is no Action input to set.
+
+The configuration layer is **provider-agnostic by construction**: it keys off the rule's string ID (`s3_bucket_public_exposure`, `nsg_allow_all_ingress`, `first_time_resource_type`, ...). The same `rules:`, `thresholds:`, `ignore:`, and `suppressions:` mechanisms apply identically to AWS rules, Azure rules, and the cross-provider abstract-type rules.
+
+```yaml
+# Phase 7 v1.2 PR3 introduced .architex.yml. v1.4 added Azure rules
+# without changing the schema -- they are configured the same way.
+
+parser:
+  mode: library              # consumer (default) | library (v1.3)
+
+rules:
+  # AWS rule overrides
+  iam_admin_policy_attached:
+    weight: 5.0              # bump default 3.5 -> 5.0
+  s3_bucket_public_exposure:
+    enabled: false           # silence the rule entirely
+
+  # Azure rule overrides (v1.4) -- same shape, same semantics
+  storage_account_public:
+    weight: 6.0              # treat public storage accounts as fail-grade
+  nsg_allow_all_ingress:
+    enabled: false           # accepted by design (all VMs behind managed bastion)
+
+thresholds:
+  warn: 3.0                  # >= warn -> medium / warn (default 3.0)
+  fail: 7.0                  # >= fail -> high / fail (default 7.0)
+
+ignore:
+  paths:
+    - "**/legacy/**"         # parser skips matching .tf files
+    - "modules/_archive/*"
+
+suppressions:
+  - rule: lambda_public_url_introduced
+    resource: aws_lambda_function_url.maintenance
+    reason: "Maintenance lambda; auth type is AWS_IAM"
+    expires: "2026-12-31"
+
+  # Azure suppressions are identical in shape; glob match works on Azure IDs
+  - rule: mssql_database_public
+    resource: azurerm_mssql_server.public_reporting
+    reason: "Behind Azure firewall + Conditional Access; reviewed 2026-Q1"
+    expires: "2026-12-31"
+  - rule: storage_account_public
+    resource: azurerm_storage_account.legacy_*
+    reason: "Legacy hosting buckets; migration tracked in TICKET-1234"
+    expires: "2026-09-30"
+```
+
+### Inline `# architex:ignore=` directives
+
+Equivalent to a `suppressions:` entry, but lives next to the resource it applies to. Works on AWS and Azure resources identically:
+
+```hcl
+# architex:ignore=s3_bucket_public_exposure reason="Static docs site, intentional"
+resource "aws_s3_bucket_policy" "docs" {
+  # ...
+}
+
+# architex:ignore=storage_account_public reason="Public CDN origin, expires=2026-09-30"
+resource "azurerm_storage_account" "public_assets" {
+  public_network_access_enabled = true
+  # ...
+}
+```
+
+### Configurable rule IDs at v1.4
+
+| Provider | Rule ID | Default weight | Impact | Trigger summary |
+|---|---|---|---|---|
+| AWS | `s3_bucket_public_exposure` | 4.0 | exposure | Public S3 bucket added or made public. |
+| AWS | `iam_admin_policy_attached` | 3.5 | identity | An IAM role/user attaches an `AdministratorAccess`-equivalent policy. |
+| AWS | `lambda_public_url_introduced` | 3.0 | exposure | `aws_lambda_function_url` added with `authorization_type = "NONE"`. |
+| AWS | `cloudfront_no_waf` | 3.0 | exposure | `aws_cloudfront_distribution` added without an attached `web_acl_id`. |
+| AWS | `ebs_unencrypted` | 3.0 | data_exposure | `aws_ebs_volume` added with `encrypted = false`. |
+| AWS | `messaging_topic_public` | 3.5 | exposure | SNS topic / SQS queue policy added with `Principal: "*"` and no `Condition`. |
+| AWS | `nacl_allow_all_ingress` | 3.5 | exposure | `aws_network_acl_rule` added with `cidr_block = "0.0.0.0/0"`, action `allow`, ingress. |
+| AWS | `eks_public_endpoint` | 3.0 | exposure | EKS cluster added with `endpoint_public_access = true` and unrestricted CIDRs. |
+| AWS | `eks_no_logging` | 2.0 | observability | EKS cluster added with empty `enabled_cluster_log_types`. |
+| AWS | `asg_unrestricted_scaling` | 2.0 | resilience | Auto Scaling Group added with `max_size > 100` (default; configurable). |
+| **Azure** | `nsg_allow_all_ingress` | 3.5 | exposure | NSG rule added with `source_address_prefix` in `{"*", "0.0.0.0/0"}` AND `access = "Allow"` AND `direction = "Inbound"`. |
+| **Azure** | `storage_account_public` | 4.0 | exposure | Storage account added with `public_network_access_enabled = true` OR `allow_nested_items_to_be_public = true`. |
+| **Azure** | `mssql_database_public` | 3.5 | data_exposure | MSSQL server added with `public_network_access_enabled = true`. |
+| Cross-provider | `new_entry_point` | 3.0 | exposure | Any abstract-`entry_point` resource added (AWS `aws_lb`, `aws_cloudfront_distribution`, `aws_apigatewayv2_api`, `aws_lambda_function_url`, OR Azure `azurerm_lb`, ...). |
+| Cross-provider | `new_data_resource` | 1.5 | data | Any abstract-`data` resource added (AWS RDS / SNS / SQS / Secrets Manager, OR Azure `azurerm_mssql_server` / `azurerm_mssql_database`). |
+| Cross-provider | `public_exposure_introduced` | 4.0 | exposure | Existing resource flips from `public = false` to `public = true`. |
+| Cross-provider | `potential_data_exposure` | 5.0 | data_exposure | A `data` resource is reachable (via the dependency graph) from a public entry point. |
+| Cross-provider | `resource_removed` | 1.5 | resilience | Any resource is removed (any provider). |
+| Baseline (opt-in) | `first_time_resource_type` | 1.0 | novelty | A resource type appears for the first time in the repo (per `.architex/baseline.json`). |
+| Baseline (opt-in) | `first_time_abstract_type` | 1.5 | novelty | An abstract type appears for the first time in the repo. |
+| Baseline (opt-in) | `first_time_edge_pair` | 1.0 | novelty | A `(source_type, edge_type, target_type)` triple appears for the first time. |
+
+> **Suppressions are never silent.** Every active and expired suppression is rendered in the PR comment's *Suppressed Findings* section with its reason and source (`config:.architex.yml` or `inline:main.tf:42`). Expired entries are still applied (the rule is dropped) but flagged with `(EXPIRED)` so reviewers refresh or remove the entry.
+
+> **Forward compatibility.** The config validator is intentionally permissive about unknown rule IDs — a config from v1.3 keeps working on v1.4 and vice versa.
+
 ## Rollout pattern (matches [master.md §7](../master.md#7-rollout-strategy))
 
 ArchiteX is meant to be adopted in three phases. The Action makes each one a one-line change.
