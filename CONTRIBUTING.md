@@ -11,8 +11,8 @@ benefits every user equally.
 ```bash
 git clone https://github.com/danilotrix86/ArchiteX.git
 cd ArchiteX
-go test ./...          # ~150 tests across 9 packages
-go build -o architex . # produces the CLI binary
+go test ./...                       # ~150 tests across 9 packages
+go build -o architex ./cmd/architex # produces the CLI binary
 ```
 
 For large-delta stress testing, run `scripts/stress-mermaid.ps1` (PowerShell)
@@ -23,13 +23,31 @@ to generate synthetic Terraform pairs and verify byte-cap regressions.
 - **Bug fixes** with a failing test that demonstrates the bug.
 - **New test cases** for edge cases or Terraform patterns not yet covered.
 - **Documentation improvements** to README, docs/, or code comments.
-- **New AWS resource support.** This is the most impactful contribution right
-  now. Adding a resource requires entries in:
-  1. `models.SupportedResources` and `models.AbstractionMap`
-     ([`models/models.go`](models/models.go))
-  2. The edge-type lookup table in [`graph/graph.go`](graph/graph.go)
-  3. Optionally, a `public` derivation rule in `graph/graph.go`
-  4. At least one test in `parser/parser_test.go` or `graph/graph_test.go`
+- **New AWS / Azure resource support.** This is the most impactful
+  contribution right now. As of the v1.4 readability refactor, adding a
+  resource is a one-file edit: add a `Register(...)` line (and any
+  `RegisterEdge(...)` lines) to the right provider file under
+  [`models/registry/`](models/registry/) -- `aws.go` for `aws_*`,
+  `azure.go` for `azurerm_*`. If the resource needs custom attribute
+  promotion (e.g. passing a literal `policy_arn` through to the graph
+  node), write a small promoter function in the same file and pass it
+  as `Promoter:`. Add at least one test in
+  [`parser/parser_test.go`](parser/parser_test.go) or
+  [`graph/graph_test.go`](graph/graph_test.go) and the byte-identical
+  golden tests in [`internal/golden/`](internal/golden/) will guard the
+  rest.
+- **New built-in risk rule.** Also a one-file edit: create
+  `risk/rules/<domain>/<rule_id>.go` with a struct that implements the
+  three-method `risk/api.Rule` interface (`ID()`, `Evaluate()`,
+  `ReviewFocus()`) and register it in
+  [`risk/rules/rules.go`](risk/rules/rules.go) at the position you want
+  it evaluated. The interpreter looks rules up by ID via the registry
+  -- no edit to `interpreter/summary.go` is needed.
+- **New cloud provider** (e.g. GCP): drop a `models/registry/gcp.go`
+  alongside `aws.go` / `azure.go`, register the types and edges, and
+  add the rules under `risk/rules/<domain>/` next to their AWS / Azure
+  counterparts (rules are organized by what they detect, not by which
+  provider they fire on). No other package needs to change.
 
 ## What needs discussion first
 

@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "score": 6,
+  "severity": "medium",
+  "status": "warn",
+  "reason_codes": [
+    "lambda_public_url_introduced",
+    "new_entry_point"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_1b25779d",
+      "type": "entry_point"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [
+    {
+      "from": "n_1b25779d",
+      "to": "n_6c63873a",
+      "type": "applies_to"
+    }
+  ],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 1,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}

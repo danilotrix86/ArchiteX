@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0.0",
+  "score": 6.5,
+  "severity": "medium",
+  "status": "warn",
+  "reason_codes": [
+    "new_entry_point",
+    "nsg_allow_all_ingress"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_2f060b99",
+      "type": "entry_point"
+    },
+    {
+      "id": "n_3491a21b",
+      "type": "network"
+    },
+    {
+      "id": "n_79da9058",
+      "type": "access_control"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [
+    {
+      "from": "n_2f060b99",
+      "to": "n_3491a21b",
+      "type": "attached_to"
+    },
+    {
+      "from": "n_79da9058",
+      "to": "n_2b3fc3c2",
+      "type": "applies_to"
+    }
+  ],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 3,
+    "removed_nodes": 0,
+    "added_edges": 2,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}

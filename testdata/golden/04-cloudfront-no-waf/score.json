@@ -1,0 +1,21 @@
+{
+  "score": 5.5,
+  "severity": "medium",
+  "status": "warn",
+  "reasons": [
+    {
+      "weight": 3.0,
+      "rule_id": "new_entry_point",
+      "message": "New public entry point aws_cloudfront_distribution.site introduced.",
+      "impact": "exposure",
+      "resource_id": "aws_cloudfront_distribution.site"
+    },
+    {
+      "weight": 2.5,
+      "rule_id": "cloudfront_no_waf",
+      "message": "CloudFront distribution aws_cloudfront_distribution.site was introduced without a WAF (web_acl_id); add AWS WAF to mitigate L7 attacks at the edge.",
+      "impact": "exposure",
+      "resource_id": "aws_cloudfront_distribution.site"
+    }
+  ]
+}

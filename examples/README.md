@@ -7,7 +7,7 @@ Every example here doubles as a CI regression check: the selftest workflow runs 
 ## Run an example locally
 
 ```bash
-go build -o architex .
+go build -o architex ./cmd/architex
 ./architex report ./examples/01-public-alb/base ./examples/01-public-alb/head --out ./.architex/
 ```
 

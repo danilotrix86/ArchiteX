@@ -25,7 +25,7 @@
 #   - main.commentBodyBudget      = 240,000 (22 KB margin under 262,144)
 # Both are deterministic; truncation is announced visibly in the output.
 #
-# Run from repo root (after `go build -o architex.exe .`):
+# Run from repo root (after `go build -o architex.exe ./cmd/architex`):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stress-mermaid.ps1
 #
 # Optional: pass `-Sizes 5,25,50` etc. to override the default sweep.
@@ -44,7 +44,7 @@ $exe   = Join-Path $root 'architex.exe'
 $work  = Join-Path $env:TEMP 'architex-stress'
 
 if (-not (Test-Path $exe)) {
-    throw "architex.exe not found at $exe -- run 'go build -o architex.exe .' first"
+    throw "architex.exe not found at $exe -- run 'go build -o architex.exe ./cmd/architex' first"
 }
 
 function New-Base {

@@ -117,10 +117,11 @@ func expandCount(block *hclsyntax.Block, resType, resName, resID string, countAt
 		// graph that looked broken.
 		//
 		// In library mode we materialize ONE phantom resource per gate,
-		// marked `Attributes["conditional"] = true`. Risk rules
-		// (rules.go / rules_v12.go / rules_v13.go) MUST treat
-		// conditional nodes as non-existent for scoring -- the
-		// isConditionalNode helper in rules_v13.go owns that contract.
+		// marked `Attributes["conditional"] = true`. Risk rules under
+		// risk/rules/<domain>/ MUST treat conditional nodes as
+		// non-existent for scoring -- the
+		// risk/rules/internal/rulefmt.IsConditional helper owns that
+		// contract and every per-resource rule guards on it.
 		if ctx != nil && ctx.libraryMode && isVarConditionalCount(countAttr) {
 			return materializeConditional(block, resType, resName, resID, ctx)
 		}

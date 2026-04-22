@@ -73,116 +73,27 @@ func (DeterministicInterpreter) ReviewFocus(d delta.Delta, r risk.RiskResult) []
 	return out
 }
 
-// focusForRule maps a triggered RiskReason to a reviewer-facing instruction.
-// Keying on RuleID (a known constant) keeps this purely deterministic and
-// avoids parsing free-form Message text.
+// focusForRule maps a triggered RiskReason to a reviewer-facing
+// instruction by dispatching to the rule's own ReviewFocus method via
+// the architex/risk registry.
+//
+// Pre-refactor this was a 100-line switch that duplicated rule IDs and
+// hard-coded copy on the interpreter side -- adding a new rule meant
+// touching three packages (rule definition + this switch + tests).
+// After PR4 of the readability refactor, every migrated rule owns its
+// own ReviewFocus method and this function is a one-line dispatcher.
+//
+// Rules NOT in the registry (today: only the Phase 7 PR5 baseline-
+// anomaly rules, which are intentionally registry-less because they
+// take *baseline.Baseline) return "" here; the caller skips them. This
+// matches the pre-refactor `default: return ""` arm exactly --
+// pre-refactor focusForRule had no cases for first_time_*, so it
+// already returned "" for them.
 func focusForRule(reason risk.RiskReason, d delta.Delta) string {
-	switch reason.RuleID {
-	case "public_exposure_introduced":
-		ids := changedNodeIDs(d, "public")
-		return fmt.Sprintf(
-			"Confirm that public exposure is intended on %s and that ingress is restricted to required ports and sources.",
-			joinHumanList(ids),
-		)
-	case "new_data_resource":
-		ids := addedNodeIDsByType(d, "data")
-		return fmt.Sprintf(
-			"Verify encryption at rest, backups, and access controls on the new data resource(s): %s.",
-			joinHumanList(ids),
-		)
-	case "new_entry_point":
-		ids := addedNodeIDsByType(d, "entry_point")
-		return fmt.Sprintf(
-			"Review the new entry point(s) %s for TLS, authentication, and exposure scope.",
-			joinHumanList(ids),
-		)
-	case "potential_data_exposure":
-		return "Trace the new public path to any data resource and confirm it is not reachable from the internet."
-	case "resource_removed":
-		ids := removedNodeIDs(d)
-		return fmt.Sprintf(
-			"Confirm the removal of %s is intended; check for orphaned dependencies and audit log retention.",
-			joinHumanList(ids),
-		)
-
-	// Phase 6 (v1.1) -- AWS Top 10 rules.
-	case "s3_bucket_public_exposure":
-		return fmt.Sprintf(
-			"Re-verify the bucket exposure on %s -- removal of a public-access block or addition of a bucket policy can grant public read; confirm Statement[].Principal is scoped.",
-			reason.ResourceID,
-		)
-	case "iam_admin_policy_attached":
-		return fmt.Sprintf(
-			"Audit the privilege grant on %s -- AdministratorAccess / IAMFullAccess gives root-equivalent control to anyone who assumes the role.",
-			reason.ResourceID,
-		)
-	case "lambda_public_url_introduced":
-		return fmt.Sprintf(
-			"Inspect the Lambda function URL %s for authorization_type, IAM auth, and (ideally) WAF coverage; public Function URLs bypass API Gateway entirely.",
-			reason.ResourceID,
-		)
-
-	// Phase 7 PR4 (v1.2) -- Coverage tranche 2 rules.
-	case "cloudfront_no_waf":
-		return fmt.Sprintf(
-			"Add an AWS WAF (web_acl_id) to %s before merging; CloudFront edges without a WAF expose the origin to every L7 attack pattern.",
-			reason.ResourceID,
-		)
-	case "ebs_volume_unencrypted":
-		return fmt.Sprintf(
-			"Set encrypted = true on %s; unencrypted volumes at rest fail PCI / HIPAA / SOC2 audits.",
-			reason.ResourceID,
-		)
-	case "messaging_topic_public":
-		return fmt.Sprintf(
-			"Restrict the topic/queue policy %s -- a Principal=\"*\" Allow lets anyone with the ARN subscribe / poll.",
-			reason.ResourceID,
-		)
-	case "nacl_allow_all_ingress":
-		return fmt.Sprintf(
-			"Tighten the NACL rule %s; an Allow on 0.0.0.0/0 at a low rule_number defeats any tighter SG above it.",
-			reason.ResourceID,
-		)
-
-	// Phase 8 (v1.3) -- Coverage tranche 3 rules.
-	case "eks_public_endpoint":
-		return fmt.Sprintf(
-			"Restrict the EKS API endpoint on %s via vpc_config.endpoint_public_access_cidrs, or set endpoint_public_access = false and access through a private link.",
-			reason.ResourceID,
-		)
-	case "eks_no_logging":
-		return fmt.Sprintf(
-			"Enable enabled_cluster_log_types on %s (api, audit, authenticator are the bare minimum) so control-plane activity is forensically auditable.",
-			reason.ResourceID,
-		)
-	case "asg_unrestricted_scaling":
-		return fmt.Sprintf(
-			"Cap max_size on %s and set a non-zero min_size floor; an unbounded ASG is both a runaway-cost vector and a stampede primitive.",
-			reason.ResourceID,
-		)
-
-	// Phase 9 (v1.4) -- Azure tranche-0 rules. Each focus message is the
-	// Azure-vocabulary analog of its AWS counterpart so reviewers used to
-	// the AWS rules see consistent guidance on Azure PRs.
-	case "nsg_allow_all_ingress":
-		return fmt.Sprintf(
-			"Tighten the NSG rule %s; an Allow inbound from \"*\" / 0.0.0.0/0 opens the subnet at the network layer regardless of any tighter NSG rule above it.",
-			reason.ResourceID,
-		)
-	case "storage_account_public":
-		return fmt.Sprintf(
-			"Re-verify the storage account %s -- public_network_access_enabled or allow_nested_items_to_be_public both expose blob/file/table/queue contents to anonymous callers; scope via private endpoints or network rules.",
-			reason.ResourceID,
-		)
-	case "mssql_database_public":
-		return fmt.Sprintf(
-			"Restrict public access on MSSQL server %s -- set public_network_access_enabled = false, or scope reachability via an azurerm_mssql_firewall_rule with explicit IP ranges.",
-			reason.ResourceID,
-		)
-
-	default:
-		return ""
+	if rule := risk.RuleByID(reason.RuleID); rule != nil {
+		return rule.ReviewFocus(reason, d)
 	}
+	return ""
 }
 
 // Helpers ---------------------------------------------------------------------
@@ -257,36 +168,12 @@ func exposureClause(r risk.RiskResult) string {
 	return ""
 }
 
-func changedNodeIDs(d delta.Delta, attrKey string) []string {
-	var out []string
-	for _, cn := range d.ChangedNodes {
-		if _, ok := cn.ChangedAttributes[attrKey]; ok {
-			out = append(out, cn.ID)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func addedNodeIDsByType(d delta.Delta, abstractType string) []string {
-	var out []string
-	for _, n := range d.AddedNodes {
-		if n.Type == abstractType {
-			out = append(out, n.ID)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func removedNodeIDs(d delta.Delta) []string {
-	out := make([]string, 0, len(d.RemovedNodes))
-	for _, n := range d.RemovedNodes {
-		out = append(out, n.ID)
-	}
-	sort.Strings(out)
-	return out
-}
+// PR3 of the readability refactor removed changedNodeIDs /
+// addedNodeIDsByType / removedNodeIDs from this file. They moved to
+// architex/risk/rules/internal/rulefmt and are now called by each
+// rule's own ReviewFocus method via the registry dispatcher in
+// focusForRule above. Keeping the dispatcher single-line here makes
+// "where does this bullet text come from?" answerable in one grep.
 
 // humanType converts an abstract type ("entry_point") into a noun phrase
 // suitable for inline prose ("entry-point").

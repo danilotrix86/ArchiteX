@@ -1,0 +1,27 @@
+{
+  "score": 9.0,
+  "severity": "high",
+  "status": "fail",
+  "reasons": [
+    {
+      "weight": 4.0,
+      "rule_id": "public_exposure_introduced",
+      "message": "Resource aws_security_group.web became publicly accessible.",
+      "impact": "exposure",
+      "resource_id": "aws_security_group.web"
+    },
+    {
+      "weight": 3.0,
+      "rule_id": "new_entry_point",
+      "message": "New public entry point aws_lb.web introduced.",
+      "impact": "exposure",
+      "resource_id": "aws_lb.web"
+    },
+    {
+      "weight": 2.0,
+      "rule_id": "potential_data_exposure",
+      "message": "Public exposure introduced in presence of data resources or security-related changes. Review potential data exposure risk.",
+      "impact": "data_exposure"
+    }
+  ]
+}

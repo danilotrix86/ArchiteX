@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "score": 5.5,
+  "severity": "medium",
+  "status": "warn",
+  "reason_codes": [
+    "cloudfront_no_waf",
+    "new_entry_point"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_5a540994",
+      "type": "entry_point"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 0,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}

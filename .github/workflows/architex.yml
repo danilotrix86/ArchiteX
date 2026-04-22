@@ -24,7 +24,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build architex
-        run: go build -o architex .
+        run: go build -o architex ./cmd/architex
 
       - name: Unit tests
         run: go test ./... -count=1

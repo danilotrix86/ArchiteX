@@ -1,0 +1,14 @@
+{
+  "score": 3.5,
+  "severity": "medium",
+  "status": "warn",
+  "reasons": [
+    {
+      "weight": 3.5,
+      "rule_id": "iam_admin_policy_attached",
+      "message": "IAM attachment aws_iam_role_policy_attachment.ops_admin grants AdministratorAccess; review for privilege escalation.",
+      "impact": "identity",
+      "resource_id": "aws_iam_role_policy_attachment.ops_admin"
+    }
+  ]
+}

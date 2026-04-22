@@ -7,6 +7,12 @@ import (
 	"architex/models"
 )
 
+// azurePerResourceCap mirrors azurePerResourceCap (which
+// lives in an internal package not importable from architex/risk). The
+// numeric value is part of the v1.4 behavioral contract -- keep them in
+// lock-step.
+const azurePerResourceCap = 2
+
 // ---------------------------------------------------------------------------
 // nsg_allow_all_ingress
 // ---------------------------------------------------------------------------
@@ -153,7 +159,7 @@ func TestEvaluate_NSG_UnresolvedAttributes_DoesNotFire(t *testing.T) {
 }
 
 func TestEvaluate_NSG_AllowAllIngress_CapEnforced(t *testing.T) {
-	// phase6CapPerRule = 2: even with three offending rules, only two
+	// azurePerResourceCap = 2: even with three offending rules, only two
 	// reasons should be emitted.
 	add := func(name string) models.Node {
 		return models.Node{
@@ -179,8 +185,8 @@ func TestEvaluate_NSG_AllowAllIngress_CapEnforced(t *testing.T) {
 			count++
 		}
 	}
-	if count != phase6CapPerRule {
-		t.Fatalf("expected exactly %d nsg_allow_all_ingress reasons, got %d", phase6CapPerRule, count)
+	if count != azurePerResourceCap {
+		t.Fatalf("expected exactly %d nsg_allow_all_ingress reasons, got %d", azurePerResourceCap, count)
 	}
 }
 
@@ -297,8 +303,8 @@ func TestEvaluate_StorageAccount_CapEnforced(t *testing.T) {
 			count++
 		}
 	}
-	if count != phase6CapPerRule {
-		t.Fatalf("expected exactly %d storage_account_public reasons, got %d", phase6CapPerRule, count)
+	if count != azurePerResourceCap {
+		t.Fatalf("expected exactly %d storage_account_public reasons, got %d", azurePerResourceCap, count)
 	}
 }
 
@@ -415,8 +421,8 @@ func TestEvaluate_MSSQL_CapEnforced(t *testing.T) {
 			count++
 		}
 	}
-	if count != phase6CapPerRule {
-		t.Fatalf("expected exactly %d mssql_database_public reasons, got %d", phase6CapPerRule, count)
+	if count != azurePerResourceCap {
+		t.Fatalf("expected exactly %d mssql_database_public reasons, got %d", azurePerResourceCap, count)
 	}
 }
 

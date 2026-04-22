@@ -9,6 +9,7 @@ import (
 	"architex/config"
 	"architex/delta"
 	"architex/models"
+	rulesbaseline "architex/risk/rules/baseline"
 )
 
 func newTestBaseline(provider, abstract, edges []string) *baseline.Baseline {
@@ -56,7 +57,7 @@ func TestFirstTimeResourceType_FiresOnce_DedupAndCap(t *testing.T) {
 			{ID: "aws_lb.web", ProviderType: "aws_lb", Type: "entry_point"},
 		},
 	}
-	got := evaluateFirstTimeResourceType(d, bl)
+	got := rulesbaseline.EvaluateFirstTimeResourceType(d, bl)
 	if len(got) != 2 {
 		t.Fatalf("expected exactly 2 first_time_resource_type reasons (one per novel type, capped), got %d: %+v", len(got), got)
 	}
@@ -87,9 +88,9 @@ func TestFirstTimeResourceType_CapAtTwo(t *testing.T) {
 			{ID: "aws_sns_topic.t", ProviderType: "aws_sns_topic", Type: "data"},
 		},
 	}
-	got := evaluateFirstTimeResourceType(d, bl)
-	if len(got) != firstTimeCapPerRule {
-		t.Errorf("expected cap of %d reasons, got %d", firstTimeCapPerRule, len(got))
+	got := rulesbaseline.EvaluateFirstTimeResourceType(d, bl)
+	if len(got) != rulesbaseline.CapPerRule {
+		t.Errorf("expected cap of %d reasons, got %d", rulesbaseline.CapPerRule, len(got))
 	}
 }
 
@@ -107,7 +108,7 @@ func TestFirstTimeAbstractType_FiresOncePerCategory(t *testing.T) {
 			{ID: "aws_subnet.main", ProviderType: "aws_subnet", Type: "network"},
 		},
 	}
-	got := evaluateFirstTimeAbstractType(d, bl)
+	got := rulesbaseline.EvaluateFirstTimeAbstractType(d, bl)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 abstract reasons (entry_point + data), got %d: %+v", len(got), got)
 	}
@@ -142,7 +143,7 @@ func TestFirstTimeEdgePair_RequiresKnownEndpoints(t *testing.T) {
 	// Note: aws_kms_alias.b / aws_kms_key.k2 are not in the node table; the
 	// rule should silently skip the second edge because it cannot resolve
 	// the endpoint provider types. So only the first kms edge fires.
-	got := evaluateFirstTimeEdgePair(d, bl)
+	got := rulesbaseline.EvaluateFirstTimeEdgePair(d, bl)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 first_time_edge_pair reason, got %d: %+v", len(got), got)
 	}
@@ -167,7 +168,7 @@ func TestFirstTimeEdgePair_DedupesSamePairAcrossInstances(t *testing.T) {
 			{From: "aws_lb.b", To: "aws_vpc.main", Type: "deployed_in"},
 		},
 	}
-	got := evaluateFirstTimeEdgePair(d, bl)
+	got := rulesbaseline.EvaluateFirstTimeEdgePair(d, bl)
 	if len(got) != 1 {
 		t.Errorf("same pair must dedupe to 1 reason, got %d", len(got))
 	}

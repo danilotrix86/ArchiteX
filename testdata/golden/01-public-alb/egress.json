@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "score": 9,
+  "severity": "high",
+  "status": "fail",
+  "reason_codes": [
+    "new_entry_point",
+    "potential_data_exposure",
+    "public_exposure_introduced"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_e9739a2f",
+      "type": "entry_point"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [
+    {
+      "id": "n_74044a31",
+      "type": "access_control",
+      "changed_attribute_keys": [
+        "public"
+      ]
+    }
+  ],
+  "added_edges": [
+    {
+      "from": "n_e9739a2f",
+      "to": "n_74044a31",
+      "type": "attached_to"
+    },
+    {
+      "from": "n_e9739a2f",
+      "to": "n_fbdf2571",
+      "type": "deployed_in"
+    }
+  ],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 2,
+    "removed_edges": 0,
+    "changed_nodes": 1
+  },
+  "suppressed_count": 0
+}

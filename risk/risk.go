@@ -14,6 +14,8 @@ import (
 	"architex/baseline"
 	"architex/config"
 	"architex/delta"
+	"architex/risk/api"
+	rulesbaseline "architex/risk/rules/baseline"
 )
 
 // RiskResult is the output of a risk evaluation against a Delta.
@@ -30,20 +32,12 @@ type RiskResult struct {
 	Suppressed []SuppressedFinding `json:"suppressed,omitempty"`
 }
 
-// RiskReason describes a single triggered rule and its contribution to the score.
-type RiskReason struct {
-	RuleID  string  `json:"rule_id"`
-	Message string  `json:"message"`
-	Impact  string  `json:"impact"`
-	Weight  float64 `json:"weight"`
-
-	// ResourceID is the Terraform resource ID this finding is about, when
-	// the rule fires per-resource. Empty for cross-resource rules
-	// (potential_data_exposure, etc.) -- those cannot be suppressed by
-	// (rule, resource) tuple. Phase 7 (v1.2 PR3): populated by all
-	// per-resource rules so suppressions can match.
-	ResourceID string `json:"resource_id,omitempty"`
-}
+// RiskReason describes a single triggered rule and its contribution to
+// the score. Aliased from architex/risk/api so rule subpackages can
+// construct values of this type without creating an import cycle through
+// architex/risk. Existing call sites (interpreter, internal/cli, tests)
+// continue to write `risk.RiskReason` and see no behavior change.
+type RiskReason = api.RiskReason
 
 // SuppressedFinding records a (rule, resource) pair that was matched and
 // silenced by an active suppression. Carries enough metadata for the audit
@@ -91,45 +85,24 @@ func EvaluateWith(d delta.Delta, cfg *config.Config, now time.Time) RiskResult {
 func EvaluateWithBaseline(d delta.Delta, cfg *config.Config, base *baseline.Baseline, now time.Time) RiskResult {
 	var reasons []RiskReason
 
-	publicReasons := evaluatePublicExposure(d)
-	reasons = append(reasons, publicReasons...)
-	reasons = append(reasons, evaluateNewData(d)...)
-	reasons = append(reasons, evaluateNewEntryPoint(d)...)
-	reasons = append(reasons, evaluateDataExposure(d, len(publicReasons) > 0)...)
-	reasons = append(reasons, evaluateRemoval(d)...)
+	// Migrated rules: every rule registered via architex/risk/api.Register()
+	// runs here as a uniform loop. Today this covers the v1.0 rules
+	// (PR2: public_exposure_introduced, new_data_resource, new_entry_point,
+	// potential_data_exposure, resource_removed); PR3-PR4 will move the
+	// remaining hand-called groups into the same loop. Order does not
+	// affect output -- applyConfig preserves input order for equal
+	// weights and the final list is sorted by (weight desc, ruleID asc).
+	for _, rule := range registered() {
+		reasons = append(reasons, rule.Evaluate(d)...)
+	}
 
-	// Phase 6 (v1.1) — AWS Top 10 rules. Order does not affect scoring; the
-	// final reason list is sorted by weight desc, rule_id asc by Evaluate.
-	reasons = append(reasons, evaluateS3BucketPublicExposure(d)...)
-	reasons = append(reasons, evaluateIAMAdminAttached(d)...)
-	reasons = append(reasons, evaluateLambdaPublicURL(d)...)
-
-	// Phase 7 PR4 (v1.2) — Coverage tranche 2 rules. Same caps and
-	// ordering invariants as the Phase 6 group.
-	reasons = append(reasons, evaluateCloudFrontNoWAF(d)...)
-	reasons = append(reasons, evaluateEBSUnencrypted(d)...)
-	reasons = append(reasons, evaluateMessagingTopicPublic(d)...)
-	reasons = append(reasons, evaluateNACLAllowAllIngress(d)...)
-
-	// Phase 8 PR1 (v1.3) — Coverage tranche 3 rules. Same caps,
-	// ordering, and conditional-node guard as the Phase 6/7 groups.
-	reasons = append(reasons, evaluateEKSPublicEndpoint(d)...)
-	reasons = append(reasons, evaluateEKSNoLogging(d)...)
-	reasons = append(reasons, evaluateASGUnrestrictedScaling(d)...)
-
-	// Phase 9 (v1.4) — Azure tranche-0 rules. Each rule short-circuits
-	// on non-azurerm_* nodes so AWS-only repositories see zero added
-	// work and produce bit-identical output to v1.3 (locked by the
-	// existing AWS regression tests).
-	reasons = append(reasons, evaluateNSGAllowAllIngress(d)...)
-	reasons = append(reasons, evaluateStorageAccountPublic(d)...)
-	reasons = append(reasons, evaluateMSSQLDatabasePublic(d)...)
-
-	// Phase 7 PR5 (v1.2) — Baseline anomaly rules. Skipped entirely when
-	// no baseline exists; this preserves the v1.1 zero-config invariant.
-	reasons = append(reasons, evaluateFirstTimeResourceType(d, base)...)
-	reasons = append(reasons, evaluateFirstTimeAbstractType(d, base)...)
-	reasons = append(reasons, evaluateFirstTimeEdgePair(d, base)...)
+	// Phase 7 PR5 (v1.2) — Baseline anomaly rules. Called explicitly
+	// (not via the registry) because they need *baseline.Baseline as a
+	// second input. Skipped entirely when no baseline exists; this
+	// preserves the v1.1 zero-config invariant.
+	reasons = append(reasons, rulesbaseline.EvaluateFirstTimeResourceType(d, base)...)
+	reasons = append(reasons, rulesbaseline.EvaluateFirstTimeAbstractType(d, base)...)
+	reasons = append(reasons, rulesbaseline.EvaluateFirstTimeEdgePair(d, base)...)
 
 	// Phase 7 (v1.2 PR3): apply config -- weight overrides, disabled
 	// rules, and suppressions -- before scoring. When cfg is nil this is
@@ -264,14 +237,6 @@ func (r RiskResult) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// MarshalJSON formats Weight with 1 decimal place (4.0 not 4).
-func (r RiskReason) MarshalJSON() ([]byte, error) {
-	type Alias RiskReason
-	return json.Marshal(&struct {
-		Weight json.RawMessage `json:"weight"`
-		Alias
-	}{
-		Weight: json.RawMessage(fmt.Sprintf("%.1f", r.Weight)),
-		Alias:  Alias(r),
-	})
-}
+// RiskReason's MarshalJSON (1-decimal weight formatting) lives on the
+// underlying type in architex/risk/api. We cannot redeclare it here
+// because RiskReason is a Go type alias, not a distinct type.

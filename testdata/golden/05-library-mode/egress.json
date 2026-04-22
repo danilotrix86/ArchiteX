@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "score": 0,
+  "severity": "low",
+  "status": "pass",
+  "reason_codes": [],
+  "added_nodes": [
+    {
+      "id": "n_c20d2f82",
+      "type": "compute"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 0,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}

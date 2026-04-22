@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// makeOversizedBody builds a synthetic summary.md mimicking the shape produced
-// by interpreter.FormatMarkdown: a small prologue, a large fenced ```mermaid
-// block, a small policy footer, and the sticky marker. We control the
-// mermaid-block byte size precisely via the totalSize argument.
+// makeOversizedBody builds a synthetic summary.md mimicking the shape
+// produced by interpreter.FormatMarkdown: a small prologue, a large fenced
+// ```mermaid block, a small policy footer, and the sticky marker. We
+// control the mermaid-block byte size precisely via the totalSize argument.
 func makeOversizedBody(totalSize int) []byte {
 	var b bytes.Buffer
 	b.WriteString("## [FAIL] Risk Level: HIGH\n\n## Plain-English Summary\n\nA stress-test summary.\n\n")

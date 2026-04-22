@@ -44,7 +44,7 @@ if ($dirty) {
 
 Step "go vet ./..."        { go vet ./... }
 Step "go test ./... -count=1" { go test ./... -count=1 }
-Step "go build -o architex.exe ." { go build -o architex.exe . }
+Step "go build -o architex.exe ./cmd/architex" { go build -o architex.exe ./cmd/architex }
 
 Write-Host ""
 if ($failures.Count -gt 0) {

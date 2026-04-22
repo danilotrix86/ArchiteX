@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0.0",
+  "score": 5,
+  "severity": "medium",
+  "status": "warn",
+  "reason_codes": [
+    "eks_no_logging",
+    "eks_public_endpoint"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_c20d2f82",
+      "type": "compute"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [
+    {
+      "from": "n_c20d2f82",
+      "to": "n_126e1832",
+      "type": "attached_to"
+    },
+    {
+      "from": "n_c20d2f82",
+      "to": "n_6dde4ef0",
+      "type": "references"
+    },
+    {
+      "from": "n_c20d2f82",
+      "to": "n_87ad1ece",
+      "type": "references"
+    }
+  ],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 3,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}

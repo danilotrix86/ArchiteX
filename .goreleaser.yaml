@@ -20,7 +20,7 @@ before:
 builds:
   - id: architex
     binary: architex
-    main: .
+    main: ./cmd/architex
     env:
       - CGO_ENABLED=0
     flags:

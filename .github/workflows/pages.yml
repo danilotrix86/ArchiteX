@@ -47,7 +47,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build architex
-        run: go build -o architex .
+        run: go build -o architex ./cmd/architex
 
       - name: Stage docs/site as the publishable root
         run: |

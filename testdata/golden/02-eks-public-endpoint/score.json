@@ -1,0 +1,21 @@
+{
+  "score": 5.0,
+  "severity": "medium",
+  "status": "warn",
+  "reasons": [
+    {
+      "weight": 3.5,
+      "rule_id": "eks_public_endpoint",
+      "message": "EKS cluster aws_eks_cluster.control exposes a public API endpoint with no CIDR allow-list; restrict via vpc_config.endpoint_public_access_cidrs.",
+      "impact": "exposure",
+      "resource_id": "aws_eks_cluster.control"
+    },
+    {
+      "weight": 1.5,
+      "rule_id": "eks_no_logging",
+      "message": "EKS cluster aws_eks_cluster.control has no enabled_cluster_log_types; control-plane activity will not be auditable.",
+      "impact": "observability",
+      "resource_id": "aws_eks_cluster.control"
+    }
+  ]
+}

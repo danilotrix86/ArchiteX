@@ -74,7 +74,7 @@ Write-Host "[validate] $($repos.Count) repos to scan."
 # build failure -- there's no point cloning anything if the binary is broken.
 Write-Host "[validate] building architex CLI..."
 $bin = if ($IsWindows -or $env:OS -like "Windows*") { "architex.exe" } else { "architex" }
-& go build -o $bin .
+& go build -o $bin ./cmd/architex
 if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 $binAbs = (Resolve-Path $bin).Path
 

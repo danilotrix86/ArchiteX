@@ -52,7 +52,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.4.0
+      - uses: danilotrix86/ArchiteX@v1.4.1
         with:
           terraform-dir: infra
 ```
@@ -319,7 +319,7 @@ Commit the baseline alongside your Terraform. From then on, novel additions surf
 
 ```bash
 # Build once
-go build -o architex .
+go build -o architex ./cmd/architex
 
 # Build the graph for a Terraform directory
 ./architex graph ./infra/

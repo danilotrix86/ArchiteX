@@ -1,0 +1,21 @@
+{
+  "score": 6.0,
+  "severity": "medium",
+  "status": "warn",
+  "reasons": [
+    {
+      "weight": 3.0,
+      "rule_id": "lambda_public_url_introduced",
+      "message": "Public Lambda function URL aws_lambda_function_url.worker_public was introduced; verify auth type and WAF coverage.",
+      "impact": "exposure",
+      "resource_id": "aws_lambda_function_url.worker_public"
+    },
+    {
+      "weight": 3.0,
+      "rule_id": "new_entry_point",
+      "message": "New public entry point aws_lambda_function_url.worker_public introduced.",
+      "impact": "exposure",
+      "resource_id": "aws_lambda_function_url.worker_public"
+    }
+  ]
+}

@@ -4,6 +4,79 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-04-22 - Internal refactor (no behavioral / output / schema change)
+
+The "readability" refactor. Restructures the codebase so adding a rule
+or a resource is a one-file edit, without changing a single byte of
+output. Guarded end-to-end by a new golden-snapshot harness
+(`internal/golden/`) that re-runs the full pipeline against
+`examples/01-public-alb` … `examples/07-azure-public-lb` and asserts
+byte-equality of `summary.md`, `score.json`, `egress.json`, and
+`report.html` (timestamps masked). Every PR in this refactor is gated
+on that harness, so:
+
+- **Zero behavioral change.** Same risk scores, same triggered rules,
+  same review-focus copy, same Mermaid diagrams, same provider
+  banners, same egress payloads.
+- **Zero output change.** Every existing PR-comment, score.json,
+  egress.json, and report.html is byte-for-byte identical to v1.4.0.
+- **Zero schema change.** `.architex.yml`, `.architex/baseline.json`,
+  and `docs/egress-schema.json` are untouched.
+
+### Internal — moved / renamed
+
+- **CLI layout.** `main.go` (~21 KB) is gone. The dispatcher now lives
+  in `cmd/architex/main.go` (~80 LOC); each subcommand has its own
+  file under `internal/cli/` (`graph.go`, `diff.go`, `score.go`,
+  `report.go`, `sanitize.go`, `baseline.go`, `comment.go`), with
+  shared helpers in `internal/cli/common.go`. The `architex` binary
+  is now built with `go build ./cmd/architex`.
+- **Risk rules: file = one rule, folder = one domain.** The flat
+  `risk/rules.go`, `risk/rules_v12.go`, `risk/rules_v13.go`,
+  `risk/rules_azure.go`, `risk/baseline_rules.go` files are replaced
+  by `risk/rules/<domain>/<rule_id>.go` (domains: `exposure`, `data`,
+  `identity`, `availability`, `observability`, `lifecycle`,
+  `baseline`). Every rule implements the `risk/api.Rule` three-method
+  interface (`ID()`, `Evaluate()`, `ReviewFocus()`) and registers
+  itself via `risk/rules/rules.go` in the same deterministic order
+  the pre-refactor switch used.
+- **Review-focus copy moved onto the rules.** `interpreter/summary.go::
+  focusForRule` shrinks from a ~100-line switch into a one-line
+  registry dispatch (`risk.RuleByID(id).ReviewFocus(...)`). Adding a
+  new rule no longer touches `interpreter/`.
+- **Resource registry: file = one provider.** `models/registry/aws.go`
+  and `models/registry/azure.go` now own `(SupportedTypes,
+  AbstractType, EdgePair, AttrPromoter)` for their respective
+  providers. `models.SupportedResources` and `models.AbstractionMap`
+  remain the public union (built from the registry at init) — every
+  existing consumer keeps working with no edit. `graph.deriveAttributes`
+  shrinks from ~250 lines to ~10, and `graph.edgeTypeMap` is gone.
+
+### Internal — added
+
+- `internal/golden/golden_test.go` and `testdata/golden/` — the
+  byte-identical snapshot harness that gates every PR in this
+  refactor.
+- `risk/api/` — leaf package owning the `Rule` interface and
+  `RiskReason` struct. Exists to break the import cycle that would
+  otherwise form between `risk/` and `risk/rules/<domain>/`.
+- `models/registry/` — provider-scoped resource metadata package.
+
+### Internal — removed
+
+- `risk/rules.go`, `risk/rules_v12.go`, `risk/rules_v13.go`,
+  `risk/rules_azure.go`, `risk/baseline_rules.go` (rules migrated to
+  `risk/rules/<domain>/`).
+- `graph.edgeTypeMap` (now in `models/registry/<provider>.go`).
+- The 100-line `focusForRule` switch in `interpreter/summary.go`.
+
+### Documentation
+
+- `CONTRIBUTING.md` updated with the new "how to add a resource",
+  "how to add a rule", and "how to add a provider" recipes.
+- `llm.md` "Project Structure" section updated to reflect the new
+  module map.
+
 ## [1.4.0] - 2026-04-21
 
 The "multi-provider" release (Phase 9). Closes the highest-asked-for

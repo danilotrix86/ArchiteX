@@ -1,0 +1,21 @@
+{
+  "score": 6.5,
+  "severity": "medium",
+  "status": "warn",
+  "reasons": [
+    {
+      "weight": 3.5,
+      "rule_id": "nsg_allow_all_ingress",
+      "message": "Network security rule azurerm_network_security_rule.open_world allows inbound traffic from *; the subnet is open at the network layer.",
+      "impact": "exposure",
+      "resource_id": "azurerm_network_security_rule.open_world"
+    },
+    {
+      "weight": 3.0,
+      "rule_id": "new_entry_point",
+      "message": "New public entry point azurerm_lb.front introduced.",
+      "impact": "exposure",
+      "resource_id": "azurerm_lb.front"
+    }
+  ]
+}

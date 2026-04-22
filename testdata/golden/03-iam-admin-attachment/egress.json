@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0.0",
+  "score": 3.5,
+  "severity": "medium",
+  "status": "warn",
+  "reason_codes": [
+    "iam_admin_policy_attached"
+  ],
+  "added_nodes": [
+    {
+      "id": "n_ce47f07b",
+      "type": "identity"
+    }
+  ],
+  "removed_nodes": [],
+  "changed_nodes": [],
+  "added_edges": [
+    {
+      "from": "n_ce47f07b",
+      "to": "n_74045d6b",
+      "type": "applies_to"
+    }
+  ],
+  "removed_edges": [],
+  "summary": {
+    "added_nodes": 1,
+    "removed_nodes": 0,
+    "added_edges": 1,
+    "removed_edges": 0,
+    "changed_nodes": 0
+  },
+  "suppressed_count": 0
+}
