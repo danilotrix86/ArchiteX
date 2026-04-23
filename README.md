@@ -7,6 +7,7 @@
 **Catch risky Terraform topology before it merges. Deterministic. Local. Free.**
 
 [![Release](https://img.shields.io/github/v/release/danilotrix86/ArchiteX?display_name=tag&color=blue)](https://github.com/danilotrix86/ArchiteX/releases)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-ArchiteX%20for%20Terraform-2088FF?logo=github)](https://github.com/marketplace/actions/architex-for-terraform)
 [![Tests](https://github.com/danilotrix86/ArchiteX/actions/workflows/architex.yml/badge.svg)](https://github.com/danilotrix86/ArchiteX/actions/workflows/architex.yml)
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
