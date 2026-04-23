@@ -163,7 +163,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.4.1
+      - uses: danilotrix86/ArchiteX@v1.4.2
         with:
           terraform-dir: infra`;
 
@@ -691,7 +691,7 @@ const { IconCopy: Copy, IconCheck: CheckIcon, IconGithub: GH } = window;
 
 function FinalCTA() {
   const [copied, setCopied] = React.useState(false);
-  const YAML = `name: ArchiteX\non:\n  pull_request:\npermissions:\n  contents: read\n  pull-requests: write\njobs:\n  architex:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: danilotrix86/ArchiteX@v1.4.1\n        with:\n          terraform-dir: infra`;
+  const YAML = `name: ArchiteX\non:\n  pull_request:\npermissions:\n  contents: read\n  pull-requests: write\njobs:\n  architex:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: danilotrix86/ArchiteX@v1.4.2\n        with:\n          terraform-dir: infra`;
   const copy = () => { navigator.clipboard.writeText(YAML).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); }); };
   return (
     <section id="install" style={{padding:'96px 24px',borderTop:'1px solid #222',textAlign:'center'}}>

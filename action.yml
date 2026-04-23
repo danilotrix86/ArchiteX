@@ -1,4 +1,4 @@
-name: ArchiteX
+name: ArchiteX for Terraform
 description: Architecture firewall for Terraform PRs. Posts a deterministic risk report as a sticky PR comment and uploads an audit bundle.
 branding:
   icon: shield

@@ -52,7 +52,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.4.1
+      - uses: danilotrix86/ArchiteX@v1.4.2
         with:
           terraform-dir: infra
 ```

@@ -4,6 +4,56 @@ All notable changes to ArchiteX are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-04-22 - Marketplace listing (no behavioral / output / schema change)
+
+Renames the GitHub Action display name in `action.yml` from `ArchiteX`
+to `ArchiteX for Terraform` so the action can be published on the
+[GitHub Actions Marketplace](https://github.com/marketplace?query=architex).
+The bare `ArchiteX` name was reserved by a dormant GitHub user account
+from 2015 and is therefore unavailable as a marketplace listing name
+(Marketplace enforces uniqueness against existing actions, users,
+*and* organizations).
+
+This is a **purely cosmetic** change to the marketplace card and the
+`Used by` UI in the Actions tab. The repository name
+(`danilotrix86/ArchiteX`), the binary name (`architex`), the CLI
+subcommand surface, the action's input/output API, the runtime
+behavior, and every existing `uses: danilotrix86/ArchiteX@<tag>`
+reference in the wild continue to work unchanged.
+
+- **Zero behavioral change.** Same risk scores, same triggered rules,
+  same review-focus copy, same Mermaid diagrams, same provider
+  banners, same egress payloads.
+- **Zero output change.** Every existing PR-comment, `score.json`,
+  `egress.json`, and `report.html` is byte-for-byte identical to v1.4.1.
+- **Zero schema change.** `.architex.yml`, `.architex/baseline.json`,
+  and `docs/egress-schema.json` are untouched.
+- **Zero migration.** Workflows pinned to `@v1.4.1` (or `@v1`) keep
+  running without any edit.
+
+### Changed
+
+- `action.yml` — `name: ArchiteX` → `name: ArchiteX for Terraform`.
+  Required by GitHub Marketplace's name-uniqueness rule. The
+  workflow-file `name:` field shown in the user-facing quickstart
+  YAML (`name: ArchiteX`) is unrelated and stays as-is — it controls
+  how the user's *workflow* shows up in their Actions tab, not the
+  marketplace listing name.
+
+### Documentation
+
+- `README.md`, `docs/github-action.md`, and `docs/site/index.html`
+  quickstart snippets bumped from `@v1.4.1` to `@v1.4.2`. Historical
+  announcement files (`docs/v1.3-announcement.md`,
+  `docs/v1.4-announcement.md`) intentionally retain their original
+  pinned versions.
+
+### Internal
+
+- `.gitignore` — added `IDEAS.md` to the "Local scratch notes" section
+  (alongside `llm.md`, `RELEASE-CHECKLIST.md`, `docs/launch-kit.md`).
+  Local-only personal backlog file; never committed.
+
 ## [1.4.1] - 2026-04-22 - Internal refactor (no behavioral / output / schema change)
 
 The "readability" refactor. Restructures the codebase so adding a rule

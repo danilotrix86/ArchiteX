@@ -27,7 +27,7 @@ jobs:
   architex:
     runs-on: ubuntu-latest
     steps:
-      - uses: danilotrix86/ArchiteX@v1.4.1
+      - uses: danilotrix86/ArchiteX@v1.4.2
         with:
           terraform-dir: infra
 ```
@@ -174,7 +174,7 @@ ArchiteX is meant to be adopted in three phases. The Action makes each one a one
 ### Phase 1 -- Visibility
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.4.1
+- uses: danilotrix86/ArchiteX@v1.4.2
   with:
     terraform-dir: infra
     mode: advisory     # default; never fails the check
@@ -189,7 +189,7 @@ Same Action, plus a separate required check on a different signal (e.g. `risk.St
 ### Phase 3 -- Enforced governance
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.4.1
+- uses: danilotrix86/ArchiteX@v1.4.2
   with:
     terraform-dir: infra
     mode: blocking     # exits non-zero when risk.Status == "fail"
@@ -304,7 +304,7 @@ Unsupported resource types are logged as warnings (category `unsupported_resourc
 **Always pin to an exact, immutable version tag** (`v1.4.1`, `v1.4.0`, `v1.3.1`, `v1.3.0`, `v1.2.0`, ...). Each tag points at a single commit forever, so a copy-pasted workflow keeps producing the same output until you intentionally upgrade.
 
 ```yaml
-- uses: danilotrix86/ArchiteX@v1.4.1
+- uses: danilotrix86/ArchiteX@v1.4.2
 ```
 
 The floating `v1` tag tracks the latest stable v1.x release. AWS-only repos can keep tracking `v1` -- v1.4 is purely additive (Azure types and rules are gated on `azurerm_*`, so the AWS path is bit-identical to v1.3). v1.4.1 is an internal refactor on top of v1.4.0 with zero behavioral, output, or schema change.
